@@ -55,8 +55,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--range-start-hm", default="16:15", help="For loop-range, inclusive start HH:MM in Beijing time.")
     p.add_argument("--range-end-hm", default="16:30", help="For loop-range, exclusive end HH:MM in Beijing time.")
     p.add_argument("--sample-seconds", type=float, default=1.0, help="Sampling interval in seconds.")
-    p.add_argument("--target-slug", default="", help="Optional exact market slug to snapshot once, e.g. btc-updown-5m-1776761100")
-    p.add_argument("--target-window-end-hm", default="", help="Optional Beijing HH:MM for the window end to snapshot once, e.g. 16:45")
+    p.add_argument("--target-slug", default="", help="Optional exact market slug to snapshot once, e.g. btc-updown-5m-1776759300")
+    p.add_argument("--target-window-end-hm", default="", help="Optional Beijing HH:MM for the window end to snapshot once, e.g. 16:45 means window 16:40-16:45")
     p.add_argument("--output-csv", default="", help="Optional explicit csv output path.")
     p.add_argument("--timeout", type=float, default=10.0)
     return p.parse_args()
@@ -92,36 +92,27 @@ def parse_hm_for_day(day_bj: datetime, hm: str) -> datetime:
     return day_bj.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
 
 
-def ceil_to_next_5m(dt: datetime) -> datetime:
+def floor_to_5m(dt: datetime) -> datetime:
     floored = dt.replace(second=0, microsecond=0)
-    rem = floored.minute % 5
-    if rem == 0 and dt.second == 0 and dt.microsecond == 0:
-        return floored
-    delta = 5 - rem
-    return floored + timedelta(minutes=delta)
+    return floored - timedelta(minutes=floored.minute % 5)
 
 
 def active_window(now_bj: datetime) -> tuple[datetime, datetime]:
-    floored = now_bj.replace(second=0, microsecond=0)
-    if now_bj.second == 0 and now_bj.microsecond == 0 and floored.minute % 5 == 0:
-        start_dt = floored
-        end_dt = floored + timedelta(minutes=5)
-        return start_dt, end_dt
-    end_dt = ceil_to_next_5m(now_bj)
-    start_dt = end_dt - timedelta(minutes=5)
+    start_dt = floor_to_5m(now_bj)
+    end_dt = start_dt + timedelta(minutes=5)
     return start_dt, end_dt
 
 
-def epoch_slug_for_window_end(series_prefix: str, end_dt_bj: datetime) -> str:
-    end_dt_utc = end_dt_bj.astimezone(UTC)
-    return f"{series_prefix}-{int(end_dt_utc.timestamp())}"
+def epoch_slug_for_window_start(series_prefix: str, start_dt_bj: datetime) -> str:
+    start_dt_utc = start_dt_bj.astimezone(UTC)
+    return f"{series_prefix}-{int(start_dt_utc.timestamp())}"
 
 
 def current_window_info(series_prefix: str, now_bj: datetime | None = None) -> WindowInfo:
     if now_bj is None:
         now_bj = datetime.now(BJ)
     start_dt, end_dt = active_window(now_bj)
-    slug = epoch_slug_for_window_end(series_prefix, end_dt)
+    slug = epoch_slug_for_window_start(series_prefix, start_dt)
     return WindowInfo(start_bj=start_dt, end_bj=end_dt, slug=slug)
 
 
@@ -207,8 +198,8 @@ def get_market_info(slug: str, template_url: str, timeout: float) -> MarketInfo:
     m = re.search(r"-(\d{10})$", slug)
     if not m:
         raise PolyError(f"Cannot parse epoch from slug: {slug}")
-    end_dt_bj = datetime.fromtimestamp(int(m.group(1)), UTC).astimezone(BJ)
-    start_dt_bj = end_dt_bj - timedelta(minutes=5)
+    start_dt_bj = datetime.fromtimestamp(int(m.group(1)), UTC).astimezone(BJ)
+    end_dt_bj = start_dt_bj + timedelta(minutes=5)
     window_text = f"{start_dt_bj:%H:%M}-{end_dt_bj:%H:%M}"
 
     return MarketInfo(
@@ -278,7 +269,8 @@ def resolve_target_slug(args: argparse.Namespace, series_prefix: str) -> str:
     if args.target_window_end_hm:
         day_bj = choose_date(args.date_bj)
         end_dt = parse_hm_for_day(day_bj, args.target_window_end_hm)
-        return epoch_slug_for_window_end(series_prefix, end_dt)
+        start_dt = end_dt - timedelta(minutes=5)
+        return epoch_slug_for_window_start(series_prefix, start_dt)
     return current_window_info(series_prefix).slug
 
 
