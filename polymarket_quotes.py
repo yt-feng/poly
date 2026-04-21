@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html as html_lib
 import json
 import re
 import sys
@@ -41,6 +42,8 @@ TARGET_PRICE_KEYS = {
     "reference_price",
     "startprice",
     "start_price",
+    "openprice",
+    "open_price",
 }
 
 FINAL_PRICE_KEYS = {
@@ -58,6 +61,8 @@ FINAL_PRICE_KEYS = {
     "current_price",
     "referencefinalprice",
     "reference_final_price",
+    "markprice",
+    "mark_price",
 }
 
 TEXT_HINT_KEYS = {
@@ -69,6 +74,27 @@ TEXT_HINT_KEYS = {
     "resolution_criteria",
     "rules",
 }
+
+TARGET_LABEL_PATTERNS = [
+    r"target\s*price",
+    r"start\s*price",
+    r"strike\s*price",
+    r"open\s*price",
+    r"目标价格",
+    r"起始价格",
+]
+
+FINAL_LABEL_PATTERNS = [
+    r"final\s*price",
+    r"settlement\s*price",
+    r"resolved\s*price",
+    r"closing\s*price",
+    r"current\s*price",
+    r"mark\s*price",
+    r"最终价格",
+    r"结算价格",
+    r"当前价格",
+]
 
 
 class PolyError(RuntimeError):
@@ -190,6 +216,13 @@ def request_json(url: str, *, timeout: float) -> Any:
     return r.json()
 
 
+def request_text(url: str, *, timeout: float) -> str:
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
+    r = requests.get(url, headers=headers, timeout=timeout)
+    r.raise_for_status()
+    return r.text
+
+
 def best_bid_ask_from_book(book: dict[str, Any]) -> tuple[float | None, float | None]:
     bids = book.get("bids") or []
     asks = book.get("asks") or []
@@ -271,11 +304,10 @@ def collect_text_candidates(raw: dict[str, Any]) -> list[str]:
     return texts
 
 
-def extract_target_price(raw: dict[str, Any]) -> str:
+def extract_target_price_from_json(raw: dict[str, Any]) -> str:
     direct = find_first_value_by_keys(raw, TARGET_PRICE_KEYS)
     if direct:
         return direct
-
     for text in collect_text_candidates(raw):
         m = re.search(
             r"(?:above|below|over|under|at|target\s*price[^0-9$]*)\$?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.\d+)?|[0-9]{4,}(?:\.\d+)?)",
@@ -284,15 +316,13 @@ def extract_target_price(raw: dict[str, Any]) -> str:
         )
         if m:
             return normalize_number_string(m.group(1))
-
     return ""
 
 
-def extract_final_price(raw: dict[str, Any]) -> str:
+def extract_final_price_from_json(raw: dict[str, Any]) -> str:
     direct = find_first_value_by_keys(raw, FINAL_PRICE_KEYS)
     if direct:
         return direct
-
     for text in collect_text_candidates(raw):
         m = re.search(
             r"(?:final\s*price|settlement\s*price|resolved\s*price|closing\s*price|current\s*price)[^0-9$]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.\d+)?|[0-9]{4,}(?:\.\d+)?)",
@@ -301,8 +331,88 @@ def extract_final_price(raw: dict[str, Any]) -> str:
         )
         if m:
             return normalize_number_string(m.group(1))
-
     return ""
+
+
+def extract_price_by_key_regex(text: str, keys: set[str]) -> str:
+    for key in sorted(keys):
+        key_json = re.escape(key)
+        patterns = [
+            rf'"{key_json}"\s*:\s*"?([0-9][0-9,]*(?:\.[0-9]+)?)"?',
+            rf"{key_json}\s*=\s*\"?([0-9][0-9,]*(?:\.[0-9]+)?)\"?",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, text, flags=re.IGNORECASE)
+            if m:
+                return normalize_number_string(m.group(1))
+    return ""
+
+
+def extract_price_by_label_regex(text: str, label_patterns: list[str]) -> str:
+    for label in label_patterns:
+        patterns = [
+            rf"{label}[^0-9$]{{0,80}}\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+            rf"([0-9][0-9,]*(?:\.[0-9]+)?)[^0-9]{{0,30}}{label}",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, text, flags=re.IGNORECASE)
+            if m:
+                return normalize_number_string(m.group(1))
+    return ""
+
+
+def extract_prices_from_html(html_text: str) -> tuple[str, str]:
+    expanded = html_lib.unescape(html_text)
+    target_price = extract_price_by_key_regex(expanded, TARGET_PRICE_KEYS)
+    final_price = extract_price_by_key_regex(expanded, FINAL_PRICE_KEYS)
+    if not target_price:
+        target_price = extract_price_by_label_regex(expanded, TARGET_LABEL_PATTERNS)
+    if not final_price:
+        final_price = extract_price_by_label_regex(expanded, FINAL_LABEL_PATTERNS)
+    return target_price, final_price
+
+
+def price_key_candidates(raw: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in iter_nodes(raw):
+        key_text = str(key)
+        if "price" in key_text.lower() or key_text.lower() in {"strike", "reference"}:
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                out[key_text] = value
+    return out
+
+
+def html_price_snippets(html_text: str) -> list[str]:
+    expanded = html_lib.unescape(html_text)
+    snippets: list[str] = []
+    for keyword in ["target", "final", "current", "settlement", "price", "目标价格", "最终价格", "当前价格"]:
+        for m in re.finditer(keyword, expanded, flags=re.IGNORECASE):
+            start = max(0, m.start() - 120)
+            end = min(len(expanded), m.end() + 180)
+            snippet = re.sub(r"\s+", " ", expanded[start:end]).strip()
+            if snippet and snippet not in snippets:
+                snippets.append(snippet)
+            if len(snippets) >= 20:
+                return snippets
+    return snippets
+
+
+def write_debug_artifact(slug: str, market_url: str, raw: dict[str, Any], html_text: str, target_price: str, final_price: str) -> None:
+    ts = datetime.now(BJ)
+    out_path = Path("debug") / ts.strftime("%Y-%m-%d") / f"{slug}_price_debug.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "ts_iso": ts.isoformat(timespec="seconds"),
+        "slug": slug,
+        "market_url": market_url,
+        "target_price_extracted": target_price,
+        "final_price_extracted": final_price,
+        "json_price_candidates": price_key_candidates(raw),
+        "text_candidates": collect_text_candidates(raw),
+        "html_price_snippets": html_price_snippets(html_text),
+        "raw_market": raw,
+    }
+    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def fetch_market_info(slug: str, template_url: str, timeout: float) -> MarketInfo:
@@ -314,7 +424,6 @@ def fetch_market_info(slug: str, template_url: str, timeout: float) -> MarketInf
 
     outcomes = try_json_loads(market.get("outcomes")) or []
     token_ids = try_json_loads(market.get("clobTokenIds")) or []
-
     if not isinstance(outcomes, list) or not isinstance(token_ids, list) or len(outcomes) != len(token_ids):
         raise PolyError(f"Unexpected market schema for slug {slug}: outcomes={outcomes!r}, token_ids={token_ids!r}")
 
@@ -336,14 +445,33 @@ def fetch_market_info(slug: str, template_url: str, timeout: float) -> MarketInf
     end_dt_bj = start_dt_bj + timedelta(minutes=5)
     window_text = f"{start_dt_bj:%H:%M}-{end_dt_bj:%H:%M}"
 
+    market_url = build_market_url(template_url, slug)
+    target_price = extract_target_price_from_json(market)
+    final_price = extract_final_price_from_json(market)
+    html_text = ""
+
+    if not target_price or not final_price:
+        try:
+            html_text = request_text(market_url, timeout=timeout)
+            html_target, html_final = extract_prices_from_html(html_text)
+            if not target_price:
+                target_price = html_target
+            if not final_price:
+                final_price = html_final
+        except Exception as e:
+            log(f"html fallback failed for {slug}: {e}")
+
+    if not target_price or not final_price:
+        write_debug_artifact(slug, market_url, market, html_text, target_price, final_price)
+
     return MarketInfo(
         slug=slug,
-        market_url=build_market_url(template_url, slug),
+        market_url=market_url,
         up_token_id=up_token,
         down_token_id=down_token,
         window_text=window_text,
-        target_price=extract_target_price(market),
-        final_price=extract_final_price(market),
+        target_price=target_price,
+        final_price=final_price,
         raw=market,
     )
 
@@ -381,7 +509,6 @@ def ensure_csv(path: Path) -> None:
 
     with path.open("r", newline="", encoding="utf-8") as f:
         rows = list(csv.reader(f))
-
     current_header = rows[0] if rows else []
     if current_header == CSV_FIELDS:
         return
@@ -434,12 +561,7 @@ def capture_once_current(args: argparse.Namespace, template_url: str, series_pre
 
 def capture_loop_current_window(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
     locked = current_window_info(series_prefix)
-    log(
-        "locked current window:",
-        f"{locked.start_bj.strftime('%H:%M')}-{locked.end_bj.strftime('%H:%M')}",
-        locked.slug,
-    )
-
+    log("locked current window:", f"{locked.start_bj.strftime('%H:%M')}-{locked.end_bj.strftime('%H:%M')}", locked.slug)
     while True:
         now_bj = datetime.now(BJ)
         if now_bj >= locked.end_bj:
@@ -472,7 +594,6 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
             sleep_s = min(max((start_bj - now_bj).total_seconds(), 0.2), args.sample_seconds)
             time.sleep(sleep_s)
             continue
-
         locked = current_window_info(series_prefix, now_bj)
         try:
             info = fetch_market_info(locked.slug, template_url, args.timeout)
@@ -481,7 +602,6 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
             print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
             log(f"snapshot error at {now_bj.isoformat()}: {e}")
-
         time.sleep(max(args.sample_seconds, 0.2))
 
 
@@ -492,7 +612,6 @@ def main() -> int:
     series_prefix = series_prefix_from_slug(seed_slug)
     day_bj = choose_date(args.date_bj)
     out_path = Path(args.output_csv) if args.output_csv else default_output_path(series_prefix, day_bj)
-
     try:
         if args.mode == "once-current":
             return capture_once_current(args, template_url, series_prefix, out_path)
