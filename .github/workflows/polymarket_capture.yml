@@ -27,6 +27,14 @@ on:
         description: Sampling interval in seconds
         required: true
         default: '1'
+      target_slug:
+        description: Optional exact market slug for one snapshot
+        required: false
+        default: ''
+      target_window_end_hm:
+        description: Optional Beijing HH:MM for one snapshot, e.g. 16:45
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -60,7 +68,9 @@ jobs:
             --date-bj "${{ inputs.date_bj }}" \
             --range-start-hm "${{ inputs.range_start_hm }}" \
             --range-end-hm "${{ inputs.range_end_hm }}" \
-            --sample-seconds "${{ inputs.sample_seconds }}"
+            --sample-seconds "${{ inputs.sample_seconds }}" \
+            --target-slug "${{ inputs.target_slug }}" \
+            --target-window-end-hm "${{ inputs.target_window_end_hm }}"
 
       - name: Commit captured data
         run: |
