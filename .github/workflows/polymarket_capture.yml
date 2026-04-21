@@ -8,9 +8,9 @@ on:
         required: true
         default: https://polymarket.com/zh/event/btc-updown-5m-1776752100
       mode:
-        description: once-current or loop-range
+        description: once-current, loop-current-window, or loop-range
         required: true
-        default: once-current
+        default: loop-current-window
       date_bj:
         description: Beijing date, YYYY-MM-DD or today
         required: true
