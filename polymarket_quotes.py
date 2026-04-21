@@ -36,6 +36,13 @@ class MarketInfo:
     raw: dict[str, Any]
 
 
+@dataclass
+class WindowInfo:
+    start_bj: datetime
+    end_bj: datetime
+    slug: str
+
+
 def log(*args: Any) -> None:
     print(*args, file=sys.stderr, flush=True)
 
@@ -43,7 +50,7 @@ def log(*args: Any) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Capture Polymarket 5-minute quote snapshots.")
     p.add_argument("--market-url", required=True, help="Any market url in the same 5m series, e.g. https://polymarket.com/zh/event/btc-updown-5m-1776752100")
-    p.add_argument("--mode", choices=["once-current", "loop-range"], default="once-current")
+    p.add_argument("--mode", choices=["once-current", "loop-current-window", "loop-range"], default="loop-current-window")
     p.add_argument("--date-bj", default="today", help="Date in Beijing timezone, format YYYY-MM-DD, or 'today'.")
     p.add_argument("--range-start-hm", default="16:15", help="For loop-range, inclusive start HH:MM in Beijing time.")
     p.add_argument("--range-end-hm", default="16:30", help="For loop-range, exclusive end HH:MM in Beijing time.")
@@ -95,6 +102,11 @@ def ceil_to_next_5m(dt: datetime) -> datetime:
 
 
 def active_window(now_bj: datetime) -> tuple[datetime, datetime]:
+    floored = now_bj.replace(second=0, microsecond=0)
+    if now_bj.second == 0 and now_bj.microsecond == 0 and floored.minute % 5 == 0:
+        start_dt = floored
+        end_dt = floored + timedelta(minutes=5)
+        return start_dt, end_dt
     end_dt = ceil_to_next_5m(now_bj)
     start_dt = end_dt - timedelta(minutes=5)
     return start_dt, end_dt
@@ -103,6 +115,14 @@ def active_window(now_bj: datetime) -> tuple[datetime, datetime]:
 def epoch_slug_for_window_end(series_prefix: str, end_dt_bj: datetime) -> str:
     end_dt_utc = end_dt_bj.astimezone(UTC)
     return f"{series_prefix}-{int(end_dt_utc.timestamp())}"
+
+
+def current_window_info(series_prefix: str, now_bj: datetime | None = None) -> WindowInfo:
+    if now_bj is None:
+        now_bj = datetime.now(BJ)
+    start_dt, end_dt = active_window(now_bj)
+    slug = epoch_slug_for_window_end(series_prefix, end_dt)
+    return WindowInfo(start_bj=start_dt, end_bj=end_dt, slug=slug)
 
 
 def build_market_url(template_url: str, slug: str) -> str:
@@ -259,9 +279,7 @@ def resolve_target_slug(args: argparse.Namespace, series_prefix: str) -> str:
         day_bj = choose_date(args.date_bj)
         end_dt = parse_hm_for_day(day_bj, args.target_window_end_hm)
         return epoch_slug_for_window_end(series_prefix, end_dt)
-    now_bj = datetime.now(BJ)
-    _, end_dt = active_window(now_bj)
-    return epoch_slug_for_window_end(series_prefix, end_dt)
+    return current_window_info(series_prefix).slug
 
 
 def capture_once_current(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
@@ -271,6 +289,29 @@ def capture_once_current(args: argparse.Namespace, template_url: str, series_pre
     append_row(out_path, row)
     print(json.dumps(row, ensure_ascii=False))
     return 0
+
+
+def capture_loop_current_window(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
+    locked = current_window_info(series_prefix)
+    info = get_market_info(locked.slug, template_url, args.timeout)
+    log(
+        "locked current window:",
+        f"{locked.start_bj.strftime('%H:%M')}-{locked.end_bj.strftime('%H:%M')}",
+        locked.slug,
+    )
+
+    while True:
+        now_bj = datetime.now(BJ)
+        if now_bj >= locked.end_bj:
+            log("current window finished")
+            return 0
+        try:
+            row = snapshot_row(info, args.timeout)
+            append_row(out_path, row)
+            print(json.dumps(row, ensure_ascii=False), flush=True)
+        except Exception as e:
+            log(f"snapshot error at {now_bj.isoformat()}: {e}")
+        time.sleep(max(args.sample_seconds, 0.2))
 
 
 def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
@@ -291,10 +332,9 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
             time.sleep(sleep_s)
             continue
 
-        _, active_end_bj = active_window(now_bj)
-        slug = epoch_slug_for_window_end(series_prefix, active_end_bj)
+        locked = current_window_info(series_prefix, now_bj)
         try:
-            info = get_market_info(slug, template_url, args.timeout)
+            info = get_market_info(locked.slug, template_url, args.timeout)
             row = snapshot_row(info, args.timeout)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
@@ -315,6 +355,8 @@ def main() -> int:
     try:
         if args.mode == "once-current":
             return capture_once_current(args, template_url, series_prefix, out_path)
+        if args.mode == "loop-current-window":
+            return capture_loop_current_window(args, template_url, series_prefix, out_path)
         return capture_loop_range(args, template_url, series_prefix, out_path)
     except requests.HTTPError as e:
         body = ""
