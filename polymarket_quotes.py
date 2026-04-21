@@ -9,7 +9,6 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,6 +19,56 @@ GAMMA_BASE = "https://gamma-api.polymarket.com"
 CLOB_BASE = "https://clob.polymarket.com"
 BJ = ZoneInfo("Asia/Shanghai")
 UTC = ZoneInfo("UTC")
+CSV_FIELDS = [
+    "ts_iso",
+    "market_url",
+    "window_text",
+    "buy_up_cents",
+    "buy_down_cents",
+    "sell_up_cents",
+    "sell_down_cents",
+    "target_price",
+    "final_price",
+]
+
+TARGET_PRICE_KEYS = {
+    "targetprice",
+    "target_price",
+    "strike",
+    "strikeprice",
+    "strike_price",
+    "referenceprice",
+    "reference_price",
+    "startprice",
+    "start_price",
+}
+
+FINAL_PRICE_KEYS = {
+    "finalprice",
+    "final_price",
+    "settlementprice",
+    "settlement_price",
+    "resolvedprice",
+    "resolved_price",
+    "closingprice",
+    "closing_price",
+    "endprice",
+    "end_price",
+    "currentprice",
+    "current_price",
+    "referencefinalprice",
+    "reference_final_price",
+}
+
+TEXT_HINT_KEYS = {
+    "question",
+    "title",
+    "description",
+    "subtitle",
+    "resolutioncriteria",
+    "resolution_criteria",
+    "rules",
+}
 
 
 class PolyError(RuntimeError):
@@ -33,6 +82,8 @@ class MarketInfo:
     up_token_id: str
     down_token_id: str
     window_text: str
+    target_price: str
+    final_price: str
     raw: dict[str, Any]
 
 
@@ -170,8 +221,91 @@ def cents(v: float | None) -> str:
     return f"{v * 100:.2f}"
 
 
-@lru_cache(maxsize=256)
-def get_market_info(slug: str, template_url: str, timeout: float) -> MarketInfo:
+def normalize_number_string(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, (int, float)):
+        return f"{float(value):.2f}"
+    if isinstance(value, str):
+        s = value.strip().replace(",", "")
+        if not s:
+            return ""
+        try:
+            return f"{float(s):.2f}"
+        except Exception:
+            m = re.search(r"([0-9]+(?:\.[0-9]+)?)", s)
+            if m:
+                return f"{float(m.group(1)):.2f}"
+    return ""
+
+
+def iter_nodes(obj: Any):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k, v
+            yield from iter_nodes(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from iter_nodes(item)
+
+
+def find_first_value_by_keys(raw: dict[str, Any], keys: set[str]) -> str:
+    for key, value in iter_nodes(raw):
+        key_norm = str(key).replace("-", "_").lower()
+        key_flat = key_norm.replace("_", "")
+        if key_norm in keys or key_flat in keys:
+            normalized = normalize_number_string(value)
+            if normalized:
+                return normalized
+    return ""
+
+
+def collect_text_candidates(raw: dict[str, Any]) -> list[str]:
+    texts: list[str] = []
+    for key, value in iter_nodes(raw):
+        key_norm = str(key).replace("-", "_").lower()
+        if key_norm in TEXT_HINT_KEYS and isinstance(value, str):
+            text = value.strip()
+            if text:
+                texts.append(text)
+    return texts
+
+
+def extract_target_price(raw: dict[str, Any]) -> str:
+    direct = find_first_value_by_keys(raw, TARGET_PRICE_KEYS)
+    if direct:
+        return direct
+
+    for text in collect_text_candidates(raw):
+        m = re.search(
+            r"(?:above|below|over|under|at|target\s*price[^0-9$]*)\$?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.\d+)?|[0-9]{4,}(?:\.\d+)?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if m:
+            return normalize_number_string(m.group(1))
+
+    return ""
+
+
+def extract_final_price(raw: dict[str, Any]) -> str:
+    direct = find_first_value_by_keys(raw, FINAL_PRICE_KEYS)
+    if direct:
+        return direct
+
+    for text in collect_text_candidates(raw):
+        m = re.search(
+            r"(?:final\s*price|settlement\s*price|resolved\s*price|closing\s*price|current\s*price)[^0-9$]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.\d+)?|[0-9]{4,}(?:\.\d+)?)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if m:
+            return normalize_number_string(m.group(1))
+
+    return ""
+
+
+def fetch_market_info(slug: str, template_url: str, timeout: float) -> MarketInfo:
     market = request_json(f"{GAMMA_BASE}/markets?slug={slug}", timeout=timeout)
     if isinstance(market, list):
         if not market:
@@ -208,6 +342,8 @@ def get_market_info(slug: str, template_url: str, timeout: float) -> MarketInfo:
         up_token_id=up_token,
         down_token_id=down_token,
         window_text=window_text,
+        target_price=extract_target_price(market),
+        final_price=extract_final_price(market),
         raw=market,
     )
 
@@ -230,6 +366,8 @@ def snapshot_row(info: MarketInfo, timeout: float) -> dict[str, str]:
         "buy_down_cents": cents(buy_down),
         "sell_up_cents": cents(sell_up),
         "sell_down_cents": cents(sell_down),
+        "target_price": info.target_price,
+        "final_price": info.final_price,
     }
 
 
@@ -237,26 +375,37 @@ def ensure_csv(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         with path.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=[
-                    "ts_iso",
-                    "market_url",
-                    "window_text",
-                    "buy_up_cents",
-                    "buy_down_cents",
-                    "sell_up_cents",
-                    "sell_down_cents",
-                ],
-            )
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
             writer.writeheader()
+        return
+
+    with path.open("r", newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+
+    current_header = rows[0] if rows else []
+    if current_header == CSV_FIELDS:
+        return
+
+    existing_rows: list[dict[str, str]] = []
+    if rows:
+        old_header = rows[0]
+        for values in rows[1:]:
+            row_map = {old_header[i]: values[i] if i < len(values) else "" for i in range(len(old_header))}
+            existing_rows.append(row_map)
+
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        for old_row in existing_rows:
+            migrated = {field: old_row.get(field, "") for field in CSV_FIELDS}
+            writer.writerow(migrated)
 
 
 def append_row(path: Path, row: dict[str, str]) -> None:
     ensure_csv(path)
     with path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-        writer.writerow(row)
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writerow({field: row.get(field, "") for field in CSV_FIELDS})
 
 
 def default_output_path(series_prefix: str, day_bj: datetime) -> Path:
@@ -276,7 +425,7 @@ def resolve_target_slug(args: argparse.Namespace, series_prefix: str) -> str:
 
 def capture_once_current(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
     slug = resolve_target_slug(args, series_prefix)
-    info = get_market_info(slug, template_url, args.timeout)
+    info = fetch_market_info(slug, template_url, args.timeout)
     row = snapshot_row(info, args.timeout)
     append_row(out_path, row)
     print(json.dumps(row, ensure_ascii=False))
@@ -285,7 +434,6 @@ def capture_once_current(args: argparse.Namespace, template_url: str, series_pre
 
 def capture_loop_current_window(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
     locked = current_window_info(series_prefix)
-    info = get_market_info(locked.slug, template_url, args.timeout)
     log(
         "locked current window:",
         f"{locked.start_bj.strftime('%H:%M')}-{locked.end_bj.strftime('%H:%M')}",
@@ -298,6 +446,7 @@ def capture_loop_current_window(args: argparse.Namespace, template_url: str, ser
             log("current window finished")
             return 0
         try:
+            info = fetch_market_info(locked.slug, template_url, args.timeout)
             row = snapshot_row(info, args.timeout)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
@@ -326,7 +475,7 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
 
         locked = current_window_info(series_prefix, now_bj)
         try:
-            info = get_market_info(locked.slug, template_url, args.timeout)
+            info = fetch_market_info(locked.slug, template_url, args.timeout)
             row = snapshot_row(info, args.timeout)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
