@@ -48,6 +48,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--range-start-hm", default="16:15", help="For loop-range, inclusive start HH:MM in Beijing time.")
     p.add_argument("--range-end-hm", default="16:30", help="For loop-range, exclusive end HH:MM in Beijing time.")
     p.add_argument("--sample-seconds", type=float, default=1.0, help="Sampling interval in seconds.")
+    p.add_argument("--target-slug", default="", help="Optional exact market slug to snapshot once, e.g. btc-updown-5m-1776761100")
+    p.add_argument("--target-window-end-hm", default="", help="Optional Beijing HH:MM for the window end to snapshot once, e.g. 16:45")
     p.add_argument("--output-csv", default="", help="Optional explicit csv output path.")
     p.add_argument("--timeout", type=float, default=10.0)
     return p.parse_args()
@@ -250,10 +252,20 @@ def default_output_path(series_prefix: str, day_bj: datetime) -> Path:
     return Path("data") / day_bj.strftime("%Y-%m-%d") / f"{series_prefix}_quotes.csv"
 
 
-def capture_once_current(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
+def resolve_target_slug(args: argparse.Namespace, series_prefix: str) -> str:
+    if args.target_slug:
+        return args.target_slug.strip()
+    if args.target_window_end_hm:
+        day_bj = choose_date(args.date_bj)
+        end_dt = parse_hm_for_day(day_bj, args.target_window_end_hm)
+        return epoch_slug_for_window_end(series_prefix, end_dt)
     now_bj = datetime.now(BJ)
     _, end_dt = active_window(now_bj)
-    slug = epoch_slug_for_window_end(series_prefix, end_dt)
+    return epoch_slug_for_window_end(series_prefix, end_dt)
+
+
+def capture_once_current(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
+    slug = resolve_target_slug(args, series_prefix)
     info = get_market_info(slug, template_url, args.timeout)
     row = snapshot_row(info, args.timeout)
     append_row(out_path, row)
