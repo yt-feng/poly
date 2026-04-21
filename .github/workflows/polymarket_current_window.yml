@@ -36,10 +36,10 @@ jobs:
 
       - name: Commit captured data
         run: |
-          if [ -n "$(git status --porcelain data)" ]; then
+          if [ -n "$(git status --porcelain data debug)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add data
+            git add data debug
             git commit -m "Add current-window Polymarket captured data"
             git push
           else
