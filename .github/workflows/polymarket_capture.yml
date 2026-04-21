@@ -1,0 +1,75 @@
+name: polymarket-capture
+
+on:
+  workflow_dispatch:
+    inputs:
+      market_url:
+        description: Seed market URL in the same 5m series
+        required: true
+        default: https://polymarket.com/zh/event/btc-updown-5m-1776752100
+      mode:
+        description: once-current or loop-range
+        required: true
+        default: once-current
+      date_bj:
+        description: Beijing date, YYYY-MM-DD or today
+        required: true
+        default: today
+      range_start_hm:
+        description: Beijing start HH:MM for loop-range
+        required: true
+        default: 16:15
+      range_end_hm:
+        description: Beijing end HH:MM for loop-range
+        required: true
+        default: 16:30
+      sample_seconds:
+        description: Sampling interval in seconds
+        required: true
+        default: '1'
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: polymarket-capture
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run capture
+        run: |
+          python polymarket_quotes.py \
+            --market-url "${{ inputs.market_url }}" \
+            --mode "${{ inputs.mode }}" \
+            --date-bj "${{ inputs.date_bj }}" \
+            --range-start-hm "${{ inputs.range_start_hm }}" \
+            --range-end-hm "${{ inputs.range_end_hm }}" \
+            --sample-seconds "${{ inputs.sample_seconds }}"
+
+      - name: Commit captured data
+        run: |
+          if [ -n "$(git status --porcelain data)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data
+            git commit -m "Add Polymarket captured data"
+            git push
+          else
+            echo "No data changes to commit"
+          fi
