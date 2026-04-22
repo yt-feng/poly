@@ -7,7 +7,7 @@ import json
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,8 @@ CSV_FIELDS = [
     "sell_down_cents",
     "target_price",
     "final_price",
+    "trade_count_1s",
+    "trade_volume_1s",
 ]
 TEXT_HINT_KEYS = {
     "question",
@@ -80,6 +82,12 @@ class WindowInfo:
     start_bj: datetime
     end_bj: datetime
     slug: str
+
+
+@dataclass
+class TradeTracker:
+    last_ts: datetime | None = None
+    seen_ids: dict[str, datetime] = field(default_factory=dict)
 
 
 def log(*args: Any) -> None:
@@ -453,13 +461,132 @@ def fetch_book(token_id: str, timeout: float) -> dict[str, Any]:
     return request_json(f"{CLOB_BASE}/book?token_id={token_id}", timeout=timeout)
 
 
-def snapshot_row(info: MarketInfo, timeout: float) -> dict[str, str]:
+def parse_trade_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        if ts > 1e15:
+            ts /= 1000_000
+        elif ts > 1e12:
+            ts /= 1000
+        return datetime.fromtimestamp(ts, UTC)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        if s.isdigit():
+            return parse_trade_timestamp(float(s))
+        s = s.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            return dt.astimezone(UTC)
+        except Exception:
+            return None
+    return None
+
+
+def extract_trade_size(trade: dict[str, Any]) -> float:
+    for key in ["size", "amount", "quantity", "shares", "tokenAmount", "filledAmount"]:
+        if key in trade:
+            try:
+                return float(str(trade[key]).replace(",", ""))
+            except Exception:
+                continue
+    return 0.0
+
+
+def extract_trade_id(trade: dict[str, Any]) -> str:
+    for key in ["id", "tradeID", "tradeId", "matchID", "matchId", "transactionHash", "txHash"]:
+        if key in trade and trade[key] not in (None, ""):
+            return str(trade[key])
+    ts = None
+    for key in ["timestamp", "createdAt", "created_at", "time", "matchedTime"]:
+        if key in trade and trade[key] not in (None, ""):
+            ts = str(trade[key])
+            break
+    size = extract_trade_size(trade)
+    return f"fallback:{ts}:{size}"
+
+
+def extract_trade_time(trade: dict[str, Any]) -> datetime | None:
+    for key in ["timestamp", "createdAt", "created_at", "time", "matchedTime", "matched_at"]:
+        if key in trade:
+            dt = parse_trade_timestamp(trade[key])
+            if dt is not None:
+                return dt
+    return None
+
+
+def extract_trade_list(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    if isinstance(payload, dict):
+        for key in ["trades", "history", "data", "results"]:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [x for x in value if isinstance(x, dict)]
+    return []
+
+
+def fetch_recent_trades(slug: str, timeout: float) -> list[dict[str, Any]]:
+    urls = [
+        f"{CLOB_BASE}/trades?market={slug}",
+        f"{CLOB_BASE}/trades?market_slug={slug}",
+        f"{CLOB_BASE}/data/trades?market={slug}",
+        f"{CLOB_BASE}/data/trades?market_slug={slug}",
+    ]
+    for url in urls:
+        try:
+            payload = request_json(url, timeout=timeout)
+            trades = extract_trade_list(payload)
+            if trades:
+                return trades
+        except Exception:
+            continue
+    return []
+
+
+def summarize_new_trades(slug: str, tracker: TradeTracker, now_utc: datetime, timeout: float) -> tuple[str, str]:
+    trades = fetch_recent_trades(slug, timeout)
+    if tracker.last_ts is None:
+        tracker.last_ts = now_utc - timedelta(seconds=1.5)
+    window_start = tracker.last_ts
+    count = 0
+    volume = 0.0
+    for trade in trades:
+        trade_dt = extract_trade_time(trade)
+        if trade_dt is None:
+            continue
+        trade_id = extract_trade_id(trade)
+        if trade_id in tracker.seen_ids:
+            continue
+        if not (window_start < trade_dt <= now_utc):
+            continue
+        tracker.seen_ids[trade_id] = trade_dt
+        count += 1
+        volume += extract_trade_size(trade)
+    tracker.last_ts = now_utc
+    cutoff = now_utc - timedelta(minutes=10)
+    tracker.seen_ids = {k: v for k, v in tracker.seen_ids.items() if v >= cutoff}
+    if count == 0:
+        return "0", "0.00"
+    return str(count), f"{volume:.2f}"
+
+
+def snapshot_row(info: MarketInfo, timeout: float, trade_tracker: TradeTracker | None = None) -> dict[str, str]:
     up_book = fetch_book(info.up_token_id, timeout=timeout)
     down_book = fetch_book(info.down_token_id, timeout=timeout)
     sell_up, buy_up = best_bid_ask_from_book(up_book)
     sell_down, buy_down = best_bid_ask_from_book(down_book)
-    final_price = fetch_live_reference_price(info.asset_key, timeout)
     now = datetime.now(BJ)
+    final_price = fetch_live_reference_price(info.asset_key, timeout)
+    trade_count = ""
+    trade_volume = ""
+    if trade_tracker is not None:
+        trade_count, trade_volume = summarize_new_trades(info.slug, trade_tracker, now.astimezone(UTC), timeout)
     return {
         "ts_iso": now.isoformat(timespec="seconds"),
         "market_url": info.market_url,
@@ -470,6 +597,8 @@ def snapshot_row(info: MarketInfo, timeout: float) -> dict[str, str]:
         "sell_down_cents": cents(sell_down),
         "target_price": info.target_price,
         "final_price": final_price,
+        "trade_count_1s": trade_count,
+        "trade_volume_1s": trade_volume,
     }
 
 
@@ -527,7 +656,8 @@ def resolve_target_slug(args: argparse.Namespace, series_prefix: str) -> str:
 def capture_once_current(args: argparse.Namespace, template_url: str, series_prefix: str, asset_key: str, out_path: Path) -> int:
     slug = resolve_target_slug(args, series_prefix)
     info = fetch_market_info(slug, template_url, asset_key, args.timeout)
-    row = snapshot_row(info, args.timeout)
+    tracker = TradeTracker()
+    row = snapshot_row(info, args.timeout, tracker)
     append_row(out_path, row)
     print(json.dumps(row, ensure_ascii=False))
     return 0
@@ -536,6 +666,7 @@ def capture_once_current(args: argparse.Namespace, template_url: str, series_pre
 def capture_loop_current_window(args: argparse.Namespace, template_url: str, series_prefix: str, asset_key: str, out_path: Path) -> int:
     locked = current_window_info(series_prefix)
     info = fetch_market_info(locked.slug, template_url, asset_key, args.timeout)
+    tracker = TradeTracker()
     log("locked current window:", f"{locked.start_bj.strftime('%H:%M')}-{locked.end_bj.strftime('%H:%M')}", locked.slug)
     while True:
         now_bj = datetime.now(BJ)
@@ -543,7 +674,7 @@ def capture_loop_current_window(args: argparse.Namespace, template_url: str, ser
             log("current window finished")
             return 0
         try:
-            row = snapshot_row(info, args.timeout)
+            row = snapshot_row(info, args.timeout, tracker)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
@@ -561,6 +692,7 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
     log(f"capture window: {start_bj.isoformat()} -> {end_bj.isoformat()}")
     cached_slug = ""
     cached_info: MarketInfo | None = None
+    tracker = TradeTracker()
     while True:
         now_bj = datetime.now(BJ)
         if now_bj >= end_bj:
@@ -575,7 +707,8 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
             if cached_slug != locked.slug or cached_info is None:
                 cached_info = fetch_market_info(locked.slug, template_url, asset_key, args.timeout)
                 cached_slug = locked.slug
-            row = snapshot_row(cached_info, args.timeout)
+                tracker = TradeTracker()
+            row = snapshot_row(cached_info, args.timeout, tracker)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
@@ -589,6 +722,7 @@ def capture_loop_next_hours(args: argparse.Namespace, template_url: str, series_
     log(f"capture next-hours: {start_bj.isoformat()} -> {end_bj.isoformat()}")
     cached_slug = ""
     cached_info: MarketInfo | None = None
+    tracker = TradeTracker()
     while True:
         now_bj = datetime.now(BJ)
         if now_bj >= end_bj:
@@ -599,7 +733,8 @@ def capture_loop_next_hours(args: argparse.Namespace, template_url: str, series_
             if cached_slug != locked.slug or cached_info is None:
                 cached_info = fetch_market_info(locked.slug, template_url, asset_key, args.timeout)
                 cached_slug = locked.slug
-            row = snapshot_row(cached_info, args.timeout)
+                tracker = TradeTracker()
+            row = snapshot_row(cached_info, args.timeout, tracker)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
