@@ -44,6 +44,7 @@ ASSET_SYMBOL_MAP = {
         "binance": "BTCUSDT",
         "coinbase": "BTC-USD",
         "kraken": "XXBTZUSD",
+        "chainlink_url": "https://data.chain.link/streams/btc-usd-cexprice-streams",
     },
     "eth": {
         "binance": "ETHUSDT",
@@ -181,6 +182,13 @@ def request_json(url: str, *, timeout: float) -> Any:
     return r.json()
 
 
+def request_text(url: str, *, timeout: float) -> str:
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
+    r = requests.get(url, headers=headers, timeout=timeout)
+    r.raise_for_status()
+    return r.text
+
+
 def best_bid_ask_from_book(book: dict[str, Any]) -> tuple[float | None, float | None]:
     bids = book.get("bids") or []
     asks = book.get("asks") or []
@@ -272,7 +280,38 @@ def extract_threshold_from_text(raw: dict[str, Any]) -> str:
     return ""
 
 
+def extract_chainlink_mid_price(text: str) -> str:
+    patterns = [
+        r'"midPrice"\s*:\s*"?([0-9][0-9,]*(?:\.[0-9]+)?)"?',
+        r'"mid-price"\s*:\s*"?([0-9][0-9,]*(?:\.[0-9]+)?)"?',
+        r'mid[- ]price[^0-9$]{0,80}\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)',
+        r'Mid[- ]Price[^0-9$]{0,80}\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            price = normalize_price(m.group(1))
+            if price:
+                return price
+    return ""
+
+
+def fetch_chainlink_mid_price(asset_key: str, timeout: float) -> str:
+    url = (ASSET_SYMBOL_MAP.get(asset_key) or {}).get("chainlink_url")
+    if not url:
+        return ""
+    try:
+        text = request_text(url, timeout=timeout)
+        return extract_chainlink_mid_price(text)
+    except Exception:
+        return ""
+
+
 def fetch_live_reference_price(asset_key: str, timeout: float) -> str:
+    chainlink_price = fetch_chainlink_mid_price(asset_key, timeout)
+    if chainlink_price:
+        return chainlink_price
+
     symbols = ASSET_SYMBOL_MAP.get(asset_key, {})
     if not symbols:
         return ""
@@ -382,10 +421,12 @@ def fetch_market_info(slug: str, template_url: str, asset_key: str, timeout: flo
     window_text = f"{start_dt_bj:%H:%M}-{end_dt_bj:%H:%M}"
     market_url = build_market_url(template_url, slug)
 
-    target_price = extract_threshold_from_text(market)
-    if not target_price:
-        target_price = fetch_window_start_reference_price(asset_key, start_dt_bj, timeout)
     initial_final_price = fetch_live_reference_price(asset_key, timeout)
+    target_price = fetch_window_start_reference_price(asset_key, start_dt_bj, timeout)
+    if not target_price and initial_final_price:
+        target_price = initial_final_price
+    if not target_price:
+        target_price = extract_threshold_from_text(market)
     if not target_price or not initial_final_price:
         write_debug_artifact(slug, market_url, market, target_price, initial_final_price)
 
