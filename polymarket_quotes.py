@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import html as html_lib
 import json
 import re
 import sys
@@ -31,40 +30,6 @@ CSV_FIELDS = [
     "target_price",
     "final_price",
 ]
-
-TARGET_PRICE_KEYS = {
-    "targetprice",
-    "target_price",
-    "strike",
-    "strikeprice",
-    "strike_price",
-    "referenceprice",
-    "reference_price",
-    "startprice",
-    "start_price",
-    "openprice",
-    "open_price",
-}
-
-FINAL_PRICE_KEYS = {
-    "finalprice",
-    "final_price",
-    "settlementprice",
-    "settlement_price",
-    "resolvedprice",
-    "resolved_price",
-    "closingprice",
-    "closing_price",
-    "endprice",
-    "end_price",
-    "currentprice",
-    "current_price",
-    "referencefinalprice",
-    "reference_final_price",
-    "markprice",
-    "mark_price",
-}
-
 TEXT_HINT_KEYS = {
     "question",
     "title",
@@ -74,27 +39,23 @@ TEXT_HINT_KEYS = {
     "resolution_criteria",
     "rules",
 }
-
-TARGET_LABEL_PATTERNS = [
-    r"target\s*price",
-    r"start\s*price",
-    r"strike\s*price",
-    r"open\s*price",
-    r"目标价格",
-    r"起始价格",
-]
-
-FINAL_LABEL_PATTERNS = [
-    r"final\s*price",
-    r"settlement\s*price",
-    r"resolved\s*price",
-    r"closing\s*price",
-    r"current\s*price",
-    r"mark\s*price",
-    r"最终价格",
-    r"结算价格",
-    r"当前价格",
-]
+ASSET_SYMBOL_MAP = {
+    "btc": {
+        "binance": "BTCUSDT",
+        "coinbase": "BTC-USD",
+        "kraken": "XXBTZUSD",
+    },
+    "eth": {
+        "binance": "ETHUSDT",
+        "coinbase": "ETH-USD",
+        "kraken": "XETHZUSD",
+    },
+    "sol": {
+        "binance": "SOLUSDT",
+        "coinbase": "SOL-USD",
+        "kraken": "SOLUSD",
+    },
+}
 
 
 class PolyError(RuntimeError):
@@ -109,7 +70,7 @@ class MarketInfo:
     down_token_id: str
     window_text: str
     target_price: str
-    final_price: str
+    asset_key: str
     raw: dict[str, Any]
 
 
@@ -156,6 +117,10 @@ def series_prefix_from_slug(slug: str) -> str:
     if not m:
         raise PolyError(f"Slug does not end with epoch seconds: {slug}")
     return m.group(1)
+
+
+def infer_asset_key(series_prefix: str) -> str:
+    return series_prefix.split("-", 1)[0].lower()
 
 
 def choose_date(date_bj: str) -> datetime:
@@ -216,13 +181,6 @@ def request_json(url: str, *, timeout: float) -> Any:
     return r.json()
 
 
-def request_text(url: str, *, timeout: float) -> str:
-    headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
-    r = requests.get(url, headers=headers, timeout=timeout)
-    r.raise_for_status()
-    return r.text
-
-
 def best_bid_ask_from_book(book: dict[str, Any]) -> tuple[float | None, float | None]:
     bids = book.get("bids") or []
     asks = book.get("asks") or []
@@ -254,7 +212,7 @@ def cents(v: float | None) -> str:
     return f"{v * 100:.2f}"
 
 
-def normalize_number_string(value: Any) -> str:
+def normalize_price(value: Any) -> str:
     if value is None or isinstance(value, bool):
         return ""
     if isinstance(value, (int, float)):
@@ -272,6 +230,10 @@ def normalize_number_string(value: Any) -> str:
     return ""
 
 
+def round_half_up_to_half(value: float) -> float:
+    return round(value * 2.0) / 2.0
+
+
 def iter_nodes(obj: Any):
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -282,94 +244,84 @@ def iter_nodes(obj: Any):
             yield from iter_nodes(item)
 
 
-def find_first_value_by_keys(raw: dict[str, Any], keys: set[str]) -> str:
-    for key, value in iter_nodes(raw):
-        key_norm = str(key).replace("-", "_").lower()
-        key_flat = key_norm.replace("_", "")
-        if key_norm in keys or key_flat in keys:
-            normalized = normalize_number_string(value)
-            if normalized:
-                return normalized
-    return ""
-
-
 def collect_text_candidates(raw: dict[str, Any]) -> list[str]:
     texts: list[str] = []
     for key, value in iter_nodes(raw):
         key_norm = str(key).replace("-", "_").lower()
         if key_norm in TEXT_HINT_KEYS and isinstance(value, str):
             text = value.strip()
-            if text:
+            if text and text not in texts:
                 texts.append(text)
     return texts
 
 
-def extract_target_price_from_json(raw: dict[str, Any]) -> str:
-    direct = find_first_value_by_keys(raw, TARGET_PRICE_KEYS)
-    if direct:
-        return direct
+def extract_threshold_from_text(raw: dict[str, Any]) -> str:
+    patterns = [
+        r"above\s+or\s+below[^0-9$]*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        r"above[^0-9$]*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        r"below[^0-9$]*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        r"高于或低于[^0-9$¥￥]*[$¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        r"高于[^0-9$¥￥]*[$¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+        r"低于[^0-9$¥￥]*[$¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+    ]
     for text in collect_text_candidates(raw):
-        m = re.search(
-            r"(?:above|below|over|under|at|target\s*price[^0-9$]*)\$?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.\d+)?|[0-9]{4,}(?:\.\d+)?)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if m:
-            return normalize_number_string(m.group(1))
-    return ""
-
-
-def extract_final_price_from_json(raw: dict[str, Any]) -> str:
-    direct = find_first_value_by_keys(raw, FINAL_PRICE_KEYS)
-    if direct:
-        return direct
-    for text in collect_text_candidates(raw):
-        m = re.search(
-            r"(?:final\s*price|settlement\s*price|resolved\s*price|closing\s*price|current\s*price)[^0-9$]*\$?\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.\d+)?|[0-9]{4,}(?:\.\d+)?)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if m:
-            return normalize_number_string(m.group(1))
-    return ""
-
-
-def extract_price_by_key_regex(text: str, keys: set[str]) -> str:
-    for key in sorted(keys):
-        key_json = re.escape(key)
-        patterns = [
-            rf'"{key_json}"\s*:\s*"?([0-9][0-9,]*(?:\.[0-9]+)?)"?',
-            rf"{key_json}\s*=\s*\"?([0-9][0-9,]*(?:\.[0-9]+)?)\"?",
-        ]
         for pattern in patterns:
             m = re.search(pattern, text, flags=re.IGNORECASE)
             if m:
-                return normalize_number_string(m.group(1))
+                return normalize_price(m.group(1))
     return ""
 
 
-def extract_price_by_label_regex(text: str, label_patterns: list[str]) -> str:
-    for label in label_patterns:
-        patterns = [
-            rf"{label}[^0-9$]{{0,80}}\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
-            rf"([0-9][0-9,]*(?:\.[0-9]+)?)[^0-9]{{0,30}}{label}",
-        ]
-        for pattern in patterns:
-            m = re.search(pattern, text, flags=re.IGNORECASE)
-            if m:
-                return normalize_number_string(m.group(1))
+def fetch_live_reference_price(asset_key: str, timeout: float) -> str:
+    symbols = ASSET_SYMBOL_MAP.get(asset_key, {})
+    if not symbols:
+        return ""
+    try:
+        data = request_json(f"https://api.binance.com/api/v3/ticker/price?symbol={symbols['binance']}", timeout=timeout)
+        price = normalize_price(data.get("price"))
+        if price:
+            return price
+    except Exception:
+        pass
+    try:
+        data = request_json(f"https://api.exchange.coinbase.com/products/{symbols['coinbase']}/ticker", timeout=timeout)
+        price = normalize_price(data.get("price"))
+        if price:
+            return price
+    except Exception:
+        pass
+    try:
+        data = request_json(f"https://api.kraken.com/0/public/Ticker?pair={symbols['kraken']}", timeout=timeout)
+        result = data.get("result") or {}
+        for entry in result.values():
+            last_trade = entry.get("c") or []
+            if last_trade:
+                price = normalize_price(last_trade[0])
+                if price:
+                    return price
+    except Exception:
+        pass
     return ""
 
 
-def extract_prices_from_html(html_text: str) -> tuple[str, str]:
-    expanded = html_lib.unescape(html_text)
-    target_price = extract_price_by_key_regex(expanded, TARGET_PRICE_KEYS)
-    final_price = extract_price_by_key_regex(expanded, FINAL_PRICE_KEYS)
-    if not target_price:
-        target_price = extract_price_by_label_regex(expanded, TARGET_LABEL_PATTERNS)
-    if not final_price:
-        final_price = extract_price_by_label_regex(expanded, FINAL_LABEL_PATTERNS)
-    return target_price, final_price
+def fetch_window_start_reference_price(asset_key: str, start_dt_bj: datetime, timeout: float) -> str:
+    symbols = ASSET_SYMBOL_MAP.get(asset_key, {})
+    if not symbols:
+        return ""
+    start_ms = int(start_dt_bj.astimezone(UTC).timestamp() * 1000)
+    end_ms = start_ms + 60_000
+    try:
+        data = request_json(
+            f"https://api.binance.com/api/v3/klines?symbol={symbols['binance']}&interval=1m&startTime={start_ms}&endTime={end_ms}&limit=1",
+            timeout=timeout,
+        )
+        if isinstance(data, list) and data:
+            open_price = normalize_price(data[0][1])
+            if open_price:
+                return f"{round_half_up_to_half(float(open_price)):.2f}"
+    except Exception:
+        pass
+    return ""
 
 
 def price_key_candidates(raw: dict[str, Any]) -> dict[str, Any]:
@@ -382,22 +334,7 @@ def price_key_candidates(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def html_price_snippets(html_text: str) -> list[str]:
-    expanded = html_lib.unescape(html_text)
-    snippets: list[str] = []
-    for keyword in ["target", "final", "current", "settlement", "price", "目标价格", "最终价格", "当前价格"]:
-        for m in re.finditer(keyword, expanded, flags=re.IGNORECASE):
-            start = max(0, m.start() - 120)
-            end = min(len(expanded), m.end() + 180)
-            snippet = re.sub(r"\s+", " ", expanded[start:end]).strip()
-            if snippet and snippet not in snippets:
-                snippets.append(snippet)
-            if len(snippets) >= 20:
-                return snippets
-    return snippets
-
-
-def write_debug_artifact(slug: str, market_url: str, raw: dict[str, Any], html_text: str, target_price: str, final_price: str) -> None:
+def write_debug_artifact(slug: str, market_url: str, raw: dict[str, Any], target_price: str, final_price: str) -> None:
     ts = datetime.now(BJ)
     out_path = Path("debug") / ts.strftime("%Y-%m-%d") / f"{slug}_price_debug.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -409,13 +346,12 @@ def write_debug_artifact(slug: str, market_url: str, raw: dict[str, Any], html_t
         "final_price_extracted": final_price,
         "json_price_candidates": price_key_candidates(raw),
         "text_candidates": collect_text_candidates(raw),
-        "html_price_snippets": html_price_snippets(html_text),
         "raw_market": raw,
     }
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def fetch_market_info(slug: str, template_url: str, timeout: float) -> MarketInfo:
+def fetch_market_info(slug: str, template_url: str, asset_key: str, timeout: float) -> MarketInfo:
     market = request_json(f"{GAMMA_BASE}/markets?slug={slug}", timeout=timeout)
     if isinstance(market, list):
         if not market:
@@ -444,25 +380,14 @@ def fetch_market_info(slug: str, template_url: str, timeout: float) -> MarketInf
     start_dt_bj = datetime.fromtimestamp(int(m.group(1)), UTC).astimezone(BJ)
     end_dt_bj = start_dt_bj + timedelta(minutes=5)
     window_text = f"{start_dt_bj:%H:%M}-{end_dt_bj:%H:%M}"
-
     market_url = build_market_url(template_url, slug)
-    target_price = extract_target_price_from_json(market)
-    final_price = extract_final_price_from_json(market)
-    html_text = ""
 
-    if not target_price or not final_price:
-        try:
-            html_text = request_text(market_url, timeout=timeout)
-            html_target, html_final = extract_prices_from_html(html_text)
-            if not target_price:
-                target_price = html_target
-            if not final_price:
-                final_price = html_final
-        except Exception as e:
-            log(f"html fallback failed for {slug}: {e}")
-
-    if not target_price or not final_price:
-        write_debug_artifact(slug, market_url, market, html_text, target_price, final_price)
+    target_price = extract_threshold_from_text(market)
+    if not target_price:
+        target_price = fetch_window_start_reference_price(asset_key, start_dt_bj, timeout)
+    initial_final_price = fetch_live_reference_price(asset_key, timeout)
+    if not target_price or not initial_final_price:
+        write_debug_artifact(slug, market_url, market, target_price, initial_final_price)
 
     return MarketInfo(
         slug=slug,
@@ -471,7 +396,7 @@ def fetch_market_info(slug: str, template_url: str, timeout: float) -> MarketInf
         down_token_id=down_token,
         window_text=window_text,
         target_price=target_price,
-        final_price=final_price,
+        asset_key=asset_key,
         raw=market,
     )
 
@@ -485,6 +410,7 @@ def snapshot_row(info: MarketInfo, timeout: float) -> dict[str, str]:
     down_book = fetch_book(info.down_token_id, timeout=timeout)
     sell_up, buy_up = best_bid_ask_from_book(up_book)
     sell_down, buy_down = best_bid_ask_from_book(down_book)
+    final_price = fetch_live_reference_price(info.asset_key, timeout)
     now = datetime.now(BJ)
     return {
         "ts_iso": now.isoformat(timespec="seconds"),
@@ -495,7 +421,7 @@ def snapshot_row(info: MarketInfo, timeout: float) -> dict[str, str]:
         "sell_up_cents": cents(sell_up),
         "sell_down_cents": cents(sell_down),
         "target_price": info.target_price,
-        "final_price": info.final_price,
+        "final_price": final_price,
     }
 
 
@@ -550,17 +476,18 @@ def resolve_target_slug(args: argparse.Namespace, series_prefix: str) -> str:
     return current_window_info(series_prefix).slug
 
 
-def capture_once_current(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
+def capture_once_current(args: argparse.Namespace, template_url: str, series_prefix: str, asset_key: str, out_path: Path) -> int:
     slug = resolve_target_slug(args, series_prefix)
-    info = fetch_market_info(slug, template_url, args.timeout)
+    info = fetch_market_info(slug, template_url, asset_key, args.timeout)
     row = snapshot_row(info, args.timeout)
     append_row(out_path, row)
     print(json.dumps(row, ensure_ascii=False))
     return 0
 
 
-def capture_loop_current_window(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
+def capture_loop_current_window(args: argparse.Namespace, template_url: str, series_prefix: str, asset_key: str, out_path: Path) -> int:
     locked = current_window_info(series_prefix)
+    info = fetch_market_info(locked.slug, template_url, asset_key, args.timeout)
     log("locked current window:", f"{locked.start_bj.strftime('%H:%M')}-{locked.end_bj.strftime('%H:%M')}", locked.slug)
     while True:
         now_bj = datetime.now(BJ)
@@ -568,7 +495,6 @@ def capture_loop_current_window(args: argparse.Namespace, template_url: str, ser
             log("current window finished")
             return 0
         try:
-            info = fetch_market_info(locked.slug, template_url, args.timeout)
             row = snapshot_row(info, args.timeout)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
@@ -577,7 +503,7 @@ def capture_loop_current_window(args: argparse.Namespace, template_url: str, ser
         time.sleep(max(args.sample_seconds, 0.2))
 
 
-def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefix: str, out_path: Path) -> int:
+def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefix: str, asset_key: str, out_path: Path) -> int:
     day_bj = choose_date(args.date_bj)
     start_bj = parse_hm_for_day(day_bj, args.range_start_hm)
     end_bj = parse_hm_for_day(day_bj, args.range_end_hm)
@@ -585,6 +511,8 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
         raise PolyError("range-end-hm must be after range-start-hm")
 
     log(f"capture window: {start_bj.isoformat()} -> {end_bj.isoformat()}")
+    cached_slug = ""
+    cached_info: MarketInfo | None = None
     while True:
         now_bj = datetime.now(BJ)
         if now_bj >= end_bj:
@@ -596,8 +524,10 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
             continue
         locked = current_window_info(series_prefix, now_bj)
         try:
-            info = fetch_market_info(locked.slug, template_url, args.timeout)
-            row = snapshot_row(info, args.timeout)
+            if cached_slug != locked.slug or cached_info is None:
+                cached_info = fetch_market_info(locked.slug, template_url, asset_key, args.timeout)
+                cached_slug = locked.slug
+            row = snapshot_row(cached_info, args.timeout)
             append_row(out_path, row)
             print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
@@ -610,14 +540,15 @@ def main() -> int:
     template_url = normalize_url(args.market_url)
     seed_slug = slug_from_market_url(template_url)
     series_prefix = series_prefix_from_slug(seed_slug)
+    asset_key = infer_asset_key(series_prefix)
     day_bj = choose_date(args.date_bj)
     out_path = Path(args.output_csv) if args.output_csv else default_output_path(series_prefix, day_bj)
     try:
         if args.mode == "once-current":
-            return capture_once_current(args, template_url, series_prefix, out_path)
+            return capture_once_current(args, template_url, series_prefix, asset_key, out_path)
         if args.mode == "loop-current-window":
-            return capture_loop_current_window(args, template_url, series_prefix, out_path)
-        return capture_loop_range(args, template_url, series_prefix, out_path)
+            return capture_loop_current_window(args, template_url, series_prefix, asset_key, out_path)
+        return capture_loop_range(args, template_url, series_prefix, asset_key, out_path)
     except requests.HTTPError as e:
         body = ""
         try:
