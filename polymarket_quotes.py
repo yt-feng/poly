@@ -89,10 +89,11 @@ def log(*args: Any) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Capture Polymarket 5-minute quote snapshots.")
     p.add_argument("--market-url", required=True, help="Any market url in the same 5m series, e.g. https://polymarket.com/zh/event/btc-updown-5m-1776752100")
-    p.add_argument("--mode", choices=["once-current", "loop-current-window", "loop-range"], default="loop-current-window")
+    p.add_argument("--mode", choices=["once-current", "loop-current-window", "loop-range", "loop-next-hours"], default="loop-current-window")
     p.add_argument("--date-bj", default="today", help="Date in Beijing timezone, format YYYY-MM-DD, or 'today'.")
     p.add_argument("--range-start-hm", default="16:15", help="For loop-range, inclusive start HH:MM in Beijing time.")
     p.add_argument("--range-end-hm", default="16:30", help="For loop-range, exclusive end HH:MM in Beijing time.")
+    p.add_argument("--duration-hours", type=float, default=2.0, help="For loop-next-hours, capture duration in hours.")
     p.add_argument("--sample-seconds", type=float, default=1.0, help="Sampling interval in seconds.")
     p.add_argument("--target-slug", default="", help="Optional exact market slug to snapshot once, e.g. btc-updown-5m-1776759300")
     p.add_argument("--target-window-end-hm", default="", help="Optional Beijing HH:MM for the window end to snapshot once, e.g. 16:45 means window 16:40-16:45")
@@ -363,6 +364,11 @@ def fetch_window_start_reference_price(asset_key: str, start_dt_bj: datetime, ti
     return ""
 
 
+def is_near_window_start(now_bj: datetime, start_dt_bj: datetime, tolerance_seconds: float = 2.0) -> bool:
+    delta = (now_bj - start_dt_bj).total_seconds()
+    return 0.0 <= delta <= tolerance_seconds
+
+
 def price_key_candidates(raw: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in iter_nodes(raw):
@@ -421,9 +427,10 @@ def fetch_market_info(slug: str, template_url: str, asset_key: str, timeout: flo
     window_text = f"{start_dt_bj:%H:%M}-{end_dt_bj:%H:%M}"
     market_url = build_market_url(template_url, slug)
 
+    now_bj = datetime.now(BJ)
     initial_final_price = fetch_live_reference_price(asset_key, timeout)
     target_price = fetch_window_start_reference_price(asset_key, start_dt_bj, timeout)
-    if not target_price and initial_final_price:
+    if not target_price and initial_final_price and is_near_window_start(now_bj, start_dt_bj):
         target_price = initial_final_price
     if not target_price:
         target_price = extract_threshold_from_text(market)
@@ -576,6 +583,30 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
         time.sleep(max(args.sample_seconds, 0.2))
 
 
+def capture_loop_next_hours(args: argparse.Namespace, template_url: str, series_prefix: str, asset_key: str, out_path: Path) -> int:
+    start_bj = datetime.now(BJ)
+    end_bj = start_bj + timedelta(hours=args.duration_hours)
+    log(f"capture next-hours: {start_bj.isoformat()} -> {end_bj.isoformat()}")
+    cached_slug = ""
+    cached_info: MarketInfo | None = None
+    while True:
+        now_bj = datetime.now(BJ)
+        if now_bj >= end_bj:
+            log("next-hours finished")
+            return 0
+        locked = current_window_info(series_prefix, now_bj)
+        try:
+            if cached_slug != locked.slug or cached_info is None:
+                cached_info = fetch_market_info(locked.slug, template_url, asset_key, args.timeout)
+                cached_slug = locked.slug
+            row = snapshot_row(cached_info, args.timeout)
+            append_row(out_path, row)
+            print(json.dumps(row, ensure_ascii=False), flush=True)
+        except Exception as e:
+            log(f"snapshot error at {now_bj.isoformat()}: {e}")
+        time.sleep(max(args.sample_seconds, 0.2))
+
+
 def main() -> int:
     args = parse_args()
     template_url = normalize_url(args.market_url)
@@ -589,7 +620,9 @@ def main() -> int:
             return capture_once_current(args, template_url, series_prefix, asset_key, out_path)
         if args.mode == "loop-current-window":
             return capture_loop_current_window(args, template_url, series_prefix, asset_key, out_path)
-        return capture_loop_range(args, template_url, series_prefix, asset_key, out_path)
+        if args.mode == "loop-range":
+            return capture_loop_range(args, template_url, series_prefix, asset_key, out_path)
+        return capture_loop_next_hours(args, template_url, series_prefix, asset_key, out_path)
     except requests.HTTPError as e:
         body = ""
         try:
