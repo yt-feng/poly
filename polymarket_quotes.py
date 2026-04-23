@@ -21,12 +21,29 @@ BJ = ZoneInfo("Asia/Shanghai")
 UTC = ZoneInfo("UTC")
 CSV_FIELDS = [
     "ts_iso",
+    "slug",
     "market_url",
     "window_text",
     "buy_up_cents",
     "buy_down_cents",
     "sell_up_cents",
     "sell_down_cents",
+    "buy_up_size",
+    "buy_down_size",
+    "sell_up_size",
+    "sell_down_size",
+    "mid_up_cents",
+    "mid_down_cents",
+    "spread_up_cents",
+    "spread_down_cents",
+    "bid_depth_up_5",
+    "ask_depth_up_5",
+    "bid_depth_down_5",
+    "ask_depth_down_5",
+    "level_count_bid_up",
+    "level_count_ask_up",
+    "level_count_bid_down",
+    "level_count_ask_down",
     "target_price",
     "final_price",
     "trade_count_1s",
@@ -198,35 +215,72 @@ def request_text(url: str, *, timeout: float) -> str:
     return r.text
 
 
-def best_bid_ask_from_book(book: dict[str, Any]) -> tuple[float | None, float | None]:
-    bids = book.get("bids") or []
-    asks = book.get("asks") or []
-
-    def parse_price(level: Any) -> float | None:
+def parse_book_levels(book_side: Any) -> list[tuple[float, float]]:
+    levels: list[tuple[float, float]] = []
+    for level in book_side or []:
+        price = None
+        size = 0.0
         if isinstance(level, dict):
-            p = level.get("price")
+            price = level.get("price")
+            size = level.get("size") or level.get("amount") or level.get("quantity") or 0.0
         elif isinstance(level, (list, tuple)) and level:
-            p = level[0]
-        else:
-            p = None
-        if p in (None, ""):
-            return None
+            price = level[0]
+            size = level[1] if len(level) > 1 else 0.0
         try:
-            return float(p)
+            price_f = float(price)
         except Exception:
-            return None
+            continue
+        try:
+            size_f = float(size)
+        except Exception:
+            size_f = 0.0
+        levels.append((price_f, size_f))
+    return levels
 
-    bid_prices = [p for p in (parse_price(x) for x in bids) if p is not None]
-    ask_prices = [p for p in (parse_price(x) for x in asks) if p is not None]
-    best_bid = max(bid_prices) if bid_prices else None
-    best_ask = min(ask_prices) if ask_prices else None
+
+def best_bid_ask_from_book(book: dict[str, Any]) -> tuple[float | None, float | None]:
+    bid_levels = parse_book_levels(book.get("bids") or [])
+    ask_levels = parse_book_levels(book.get("asks") or [])
+    best_bid = max((p for p, _ in bid_levels), default=None)
+    best_ask = min((p for p, _ in ask_levels), default=None)
     return best_bid, best_ask
+
+
+def top_size(book_side: Any, best: str) -> str:
+    levels = parse_book_levels(book_side)
+    if not levels:
+        return ""
+    chosen = max(levels, key=lambda x: x[0]) if best == "bid" else min(levels, key=lambda x: x[0])
+    return f"{chosen[1]:.2f}"
+
+
+def level_count(book_side: Any) -> str:
+    return str(len(parse_book_levels(book_side)))
+
+
+def depth_sum(book_side: Any, top_n: int = 5) -> str:
+    levels = parse_book_levels(book_side)[:top_n]
+    if not levels:
+        return ""
+    return f"{sum(size for _, size in levels):.2f}"
 
 
 def cents(v: float | None) -> str:
     if v is None:
         return ""
     return f"{v * 100:.2f}"
+
+
+def mid_cents(best_bid: float | None, best_ask: float | None) -> str:
+    if best_bid is None or best_ask is None:
+        return ""
+    return f"{((best_bid + best_ask) / 2.0) * 100:.2f}"
+
+
+def spread_cents(best_bid: float | None, best_ask: float | None) -> str:
+    if best_bid is None or best_ask is None:
+        return ""
+    return f"{(best_ask - best_bid) * 100:.2f}"
 
 
 def normalize_price(value: Any) -> str:
@@ -320,7 +374,6 @@ def fetch_live_reference_price(asset_key: str, timeout: float) -> str:
     chainlink_price = fetch_chainlink_mid_price(asset_key, timeout)
     if chainlink_price:
         return chainlink_price
-
     symbols = ASSET_SYMBOL_MAP.get(asset_key, {})
     if not symbols:
         return ""
@@ -410,23 +463,19 @@ def fetch_market_info(slug: str, template_url: str, asset_key: str, timeout: flo
         if not market:
             raise PolyError(f"No market found for slug: {slug}")
         market = market[0]
-
     outcomes = try_json_loads(market.get("outcomes")) or []
     token_ids = try_json_loads(market.get("clobTokenIds")) or []
     if not isinstance(outcomes, list) or not isinstance(token_ids, list) or len(outcomes) != len(token_ids):
         raise PolyError(f"Unexpected market schema for slug {slug}: outcomes={outcomes!r}, token_ids={token_ids!r}")
-
     mapping: dict[str, str] = {}
     for outcome, token_id in zip(outcomes, token_ids):
         if outcome is None or token_id is None:
             continue
         mapping[str(outcome).strip().lower()] = str(token_id)
-
     up_token = mapping.get("up") or mapping.get("yes")
     down_token = mapping.get("down") or mapping.get("no")
     if not up_token or not down_token:
         raise PolyError(f"Could not map Up/Down tokens from outcomes: {outcomes!r}")
-
     m = re.search(r"-(\d{10})$", slug)
     if not m:
         raise PolyError(f"Cannot parse epoch from slug: {slug}")
@@ -434,7 +483,6 @@ def fetch_market_info(slug: str, template_url: str, asset_key: str, timeout: flo
     end_dt_bj = start_dt_bj + timedelta(minutes=5)
     window_text = f"{start_dt_bj:%H:%M}-{end_dt_bj:%H:%M}"
     market_url = build_market_url(template_url, slug)
-
     now_bj = datetime.now(BJ)
     initial_final_price = fetch_live_reference_price(asset_key, timeout)
     target_price = fetch_window_start_reference_price(asset_key, start_dt_bj, timeout)
@@ -444,7 +492,6 @@ def fetch_market_info(slug: str, template_url: str, asset_key: str, timeout: flo
         target_price = extract_threshold_from_text(market)
     if not target_price or not initial_final_price:
         write_debug_artifact(slug, market_url, market, target_price, initial_final_price)
-
     return MarketInfo(
         slug=slug,
         market_url=market_url,
@@ -572,15 +619,15 @@ def summarize_new_trades(slug: str, tracker: TradeTracker, now_utc: datetime, ti
     cutoff = now_utc - timedelta(minutes=10)
     tracker.seen_ids = {k: v for k, v in tracker.seen_ids.items() if v >= cutoff}
     if count == 0:
-        return "0", "0.00"
+        return "", ""
     return str(count), f"{volume:.2f}"
 
 
 def snapshot_row(info: MarketInfo, timeout: float, trade_tracker: TradeTracker | None = None) -> dict[str, str]:
     up_book = fetch_book(info.up_token_id, timeout=timeout)
     down_book = fetch_book(info.down_token_id, timeout=timeout)
-    sell_up, buy_up = best_bid_ask_from_book(up_book)
-    sell_down, buy_down = best_bid_ask_from_book(down_book)
+    up_best_bid, up_best_ask = best_bid_ask_from_book(up_book)
+    down_best_bid, down_best_ask = best_bid_ask_from_book(down_book)
     now = datetime.now(BJ)
     final_price = fetch_live_reference_price(info.asset_key, timeout)
     trade_count = ""
@@ -589,12 +636,29 @@ def snapshot_row(info: MarketInfo, timeout: float, trade_tracker: TradeTracker |
         trade_count, trade_volume = summarize_new_trades(info.slug, trade_tracker, now.astimezone(UTC), timeout)
     return {
         "ts_iso": now.isoformat(timespec="seconds"),
+        "slug": info.slug,
         "market_url": info.market_url,
         "window_text": info.window_text,
-        "buy_up_cents": cents(buy_up),
-        "buy_down_cents": cents(buy_down),
-        "sell_up_cents": cents(sell_up),
-        "sell_down_cents": cents(sell_down),
+        "buy_up_cents": cents(up_best_ask),
+        "buy_down_cents": cents(down_best_ask),
+        "sell_up_cents": cents(up_best_bid),
+        "sell_down_cents": cents(down_best_bid),
+        "buy_up_size": top_size(up_book.get("asks"), "ask"),
+        "buy_down_size": top_size(down_book.get("asks"), "ask"),
+        "sell_up_size": top_size(up_book.get("bids"), "bid"),
+        "sell_down_size": top_size(down_book.get("bids"), "bid"),
+        "mid_up_cents": mid_cents(up_best_bid, up_best_ask),
+        "mid_down_cents": mid_cents(down_best_bid, down_best_ask),
+        "spread_up_cents": spread_cents(up_best_bid, up_best_ask),
+        "spread_down_cents": spread_cents(down_best_bid, down_best_ask),
+        "bid_depth_up_5": depth_sum(up_book.get("bids"), 5),
+        "ask_depth_up_5": depth_sum(up_book.get("asks"), 5),
+        "bid_depth_down_5": depth_sum(down_book.get("bids"), 5),
+        "ask_depth_down_5": depth_sum(down_book.get("asks"), 5),
+        "level_count_bid_up": level_count(up_book.get("bids")),
+        "level_count_ask_up": level_count(up_book.get("asks")),
+        "level_count_bid_down": level_count(down_book.get("bids")),
+        "level_count_ask_down": level_count(down_book.get("asks")),
         "target_price": info.target_price,
         "final_price": final_price,
         "trade_count_1s": trade_count,
@@ -609,20 +673,17 @@ def ensure_csv(path: Path) -> None:
             writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
             writer.writeheader()
         return
-
     with path.open("r", newline="", encoding="utf-8") as f:
         rows = list(csv.reader(f))
     current_header = rows[0] if rows else []
     if current_header == CSV_FIELDS:
         return
-
     existing_rows: list[dict[str, str]] = []
     if rows:
         old_header = rows[0]
         for values in rows[1:]:
             row_map = {old_header[i]: values[i] if i < len(values) else "" for i in range(len(old_header))}
             existing_rows.append(row_map)
-
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
@@ -688,7 +749,6 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
     end_bj = parse_hm_for_day(day_bj, args.range_end_hm)
     if end_bj <= start_bj:
         raise PolyError("range-end-hm must be after range-start-hm")
-
     log(f"capture window: {start_bj.isoformat()} -> {end_bj.isoformat()}")
     cached_slug = ""
     cached_info: MarketInfo | None = None
