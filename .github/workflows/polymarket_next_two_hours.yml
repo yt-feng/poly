@@ -40,9 +40,22 @@ jobs:
           if [ -n "$(git status --porcelain data debug)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git config pull.rebase true
+            git config rebase.autoStash true
             git add data debug
-            git commit -m "Add next-two-hours Polymarket captured data"
-            git push
+            git commit -m "Add next-two-hours Polymarket captured data" || echo "Nothing to commit"
+            for attempt in 1 2 3; do
+              git fetch origin main
+              git pull --rebase origin main || { git rebase --abort || true; exit 1; }
+              if git push origin HEAD:main; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "Push failed after 3 attempts"
+                exit 1
+              fi
+              sleep 5
+            done
           else
             echo "No data changes to commit"
           fi
