@@ -1,0 +1,216 @@
+name: polymarket-next-25-hours
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: polymarket-next-25-hours
+  cancel-in-progress: false
+
+jobs:
+  capture_part1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part1"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1"
+            if [ -n "$(git status --porcelain data debug)" ]; then
+              git add data debug
+              git commit -m "Add Polymarket data backup part1 chunk ${chunk}"
+              git push
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part2:
+    needs: capture_part1
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part2"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1"
+            if [ -n "$(git status --porcelain data debug)" ]; then
+              git add data debug
+              git commit -m "Add Polymarket data backup part2 chunk ${chunk}"
+              git push
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part3:
+    needs: capture_part2
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part3"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1"
+            if [ -n "$(git status --porcelain data debug)" ]; then
+              git add data debug
+              git commit -m "Add Polymarket data backup part3 chunk ${chunk}"
+              git push
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part4:
+    needs: capture_part3
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part4"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1"
+            if [ -n "$(git status --porcelain data debug)" ]; then
+              git add data debug
+              git commit -m "Add Polymarket data backup part4 chunk ${chunk}"
+              git push
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part5:
+    needs: capture_part4
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part5"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1"
+            if [ -n "$(git status --porcelain data debug)" ]; then
+              git add data debug
+              git commit -m "Add Polymarket data backup part5 chunk ${chunk}"
+              git push
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
