@@ -39,13 +39,15 @@ jobs:
         run: |
           for chunk in $(seq 1 10); do
             echo "Starting chunk ${chunk}/10 in capture_part1"
+            OUT="data/runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part1_chunk${chunk}_btc-updown-5m_quotes.csv"
             python polymarket_quotes.py \
               --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
-              --sample-seconds "1"
-            if [ -n "$(git status --porcelain data debug)" ]; then
-              git add data debug
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
               git commit -m "Add Polymarket data backup part1 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
               for attempt in 1 2 3; do
                 git fetch origin main
@@ -93,13 +95,15 @@ jobs:
         run: |
           for chunk in $(seq 1 10); do
             echo "Starting chunk ${chunk}/10 in capture_part2"
+            OUT="data/runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part2_chunk${chunk}_btc-updown-5m_quotes.csv"
             python polymarket_quotes.py \
               --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
-              --sample-seconds "1"
-            if [ -n "$(git status --porcelain data debug)" ]; then
-              git add data debug
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
               git commit -m "Add Polymarket data backup part2 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
               for attempt in 1 2 3; do
                 git fetch origin main
@@ -147,13 +151,15 @@ jobs:
         run: |
           for chunk in $(seq 1 10); do
             echo "Starting chunk ${chunk}/10 in capture_part3"
+            OUT="data/runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part3_chunk${chunk}_btc-updown-5m_quotes.csv"
             python polymarket_quotes.py \
               --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
-              --sample-seconds "1"
-            if [ -n "$(git status --porcelain data debug)" ]; then
-              git add data debug
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
               git commit -m "Add Polymarket data backup part3 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
               for attempt in 1 2 3; do
                 git fetch origin main
@@ -201,13 +207,15 @@ jobs:
         run: |
           for chunk in $(seq 1 10); do
             echo "Starting chunk ${chunk}/10 in capture_part4"
+            OUT="data/runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part4_chunk${chunk}_btc-updown-5m_quotes.csv"
             python polymarket_quotes.py \
               --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
-              --sample-seconds "1"
-            if [ -n "$(git status --porcelain data debug)" ]; then
-              git add data debug
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
               git commit -m "Add Polymarket data backup part4 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
               for attempt in 1 2 3; do
                 git fetch origin main
@@ -255,13 +263,15 @@ jobs:
         run: |
           for chunk in $(seq 1 10); do
             echo "Starting chunk ${chunk}/10 in capture_part5"
+            OUT="data/runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part5_chunk${chunk}_btc-updown-5m_quotes.csv"
             python polymarket_quotes.py \
               --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
-              --sample-seconds "1"
-            if [ -n "$(git status --porcelain data debug)" ]; then
-              git add data debug
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
               git commit -m "Add Polymarket data backup part5 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
               for attempt in 1 2 3; do
                 git fetch origin main
