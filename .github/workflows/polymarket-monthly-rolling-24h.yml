@@ -1,0 +1,312 @@
+name: polymarket-monthly-rolling-24h
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *'
+
+env:
+  MONITOR_UNTIL_UTC: '2026-05-25T07:00:00Z'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: polymarket-monthly-rolling-24h
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.window.outputs.should_run }}
+    steps:
+      - name: Decide whether this run should proceed
+        id: window
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          now_epoch=$(date -u +%s)
+          until_epoch=$(date -u -d "${MONITOR_UNTIL_UTC}" +%s)
+          if [ "${now_epoch}" -lt "${until_epoch}" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled monitoring window is still active until ${MONITOR_UNTIL_UTC}."
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Monitoring window ended at ${MONITOR_UNTIL_UTC}; skipping scheduled run."
+          fi
+
+  capture_part1:
+    needs: guard
+    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
+          git config rebase.autoStash true
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part1"
+            OUT="data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part1_chunk${chunk}_btc-updown-5m_quotes.csv"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
+              git commit -m "Add monthly Polymarket data part1 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
+              for attempt in 1 2 3; do
+                git fetch origin main
+                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
+                if git push origin HEAD:main; then
+                  break
+                fi
+                if [ "$attempt" -eq 3 ]; then
+                  echo "Push failed after 3 attempts"
+                  exit 1
+                fi
+                sleep 5
+              done
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part2:
+    needs:
+      - guard
+      - capture_part1
+    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
+          git config rebase.autoStash true
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part2"
+            OUT="data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part2_chunk${chunk}_btc-updown-5m_quotes.csv"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
+              git commit -m "Add monthly Polymarket data part2 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
+              for attempt in 1 2 3; do
+                git fetch origin main
+                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
+                if git push origin HEAD:main; then
+                  break
+                fi
+                if [ "$attempt" -eq 3 ]; then
+                  echo "Push failed after 3 attempts"
+                  exit 1
+                fi
+                sleep 5
+              done
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part3:
+    needs:
+      - guard
+      - capture_part2
+    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
+          git config rebase.autoStash true
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part3"
+            OUT="data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part3_chunk${chunk}_btc-updown-5m_quotes.csv"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
+              git commit -m "Add monthly Polymarket data part3 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
+              for attempt in 1 2 3; do
+                git fetch origin main
+                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
+                if git push origin HEAD:main; then
+                  break
+                fi
+                if [ "$attempt" -eq 3 ]; then
+                  echo "Push failed after 3 attempts"
+                  exit 1
+                fi
+                sleep 5
+              done
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part4:
+    needs:
+      - guard
+      - capture_part3
+    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
+          git config rebase.autoStash true
+      - name: Capture 5 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 10); do
+            echo "Starting chunk ${chunk}/10 in capture_part4"
+            OUT="data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part4_chunk${chunk}_btc-updown-5m_quotes.csv"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
+              git commit -m "Add monthly Polymarket data part4 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
+              for attempt in 1 2 3; do
+                git fetch origin main
+                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
+                if git push origin HEAD:main; then
+                  break
+                fi
+                if [ "$attempt" -eq 3 ]; then
+                  echo "Push failed after 3 attempts"
+                  exit 1
+                fi
+                sleep 5
+              done
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
+
+  capture_part5:
+    needs:
+      - guard
+      - capture_part4
+    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 260
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config pull.rebase true
+          git config rebase.autoStash true
+      - name: Capture 4 hours with 30-minute backups
+        run: |
+          for chunk in $(seq 1 8); do
+            echo "Starting chunk ${chunk}/8 in capture_part5"
+            OUT="data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part5_chunk${chunk}_btc-updown-5m_quotes.csv"
+            python polymarket_quotes.py \
+              --market-url "https://polymarket.com/zh/event/btc-updown-5m-1776752100" \
+              --mode "loop-next-hours" \
+              --duration-hours "0.5" \
+              --sample-seconds "1" \
+              --output-csv "${OUT}"
+            if [ -n "$(git status --porcelain data)" ]; then
+              git add data
+              git commit -m "Add monthly Polymarket data part5 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
+              for attempt in 1 2 3; do
+                git fetch origin main
+                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
+                if git push origin HEAD:main; then
+                  break
+                fi
+                if [ "$attempt" -eq 3 ]; then
+                  echo "Push failed after 3 attempts"
+                  exit 1
+                fi
+                sleep 5
+              done
+            else
+              echo "No data changes after chunk ${chunk}"
+            fi
+          done
