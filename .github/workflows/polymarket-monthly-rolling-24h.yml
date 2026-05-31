@@ -5,9 +5,6 @@ on:
   schedule:
     - cron: '0 7 * * *'
 
-env:
-  MONITOR_UNTIL_UTC: '2026-05-25T07:00:00Z'
-
 permissions:
   contents: write
 
@@ -16,31 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  guard:
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.window.outputs.should_run }}
-    steps:
-      - name: Decide whether this run should proceed
-        id: window
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          now_epoch=$(date -u +%s)
-          until_epoch=$(date -u -d "${MONITOR_UNTIL_UTC}" +%s)
-          if [ "${now_epoch}" -lt "${until_epoch}" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled monitoring window is still active until ${MONITOR_UNTIL_UTC}."
-          else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Monitoring window ended at ${MONITOR_UNTIL_UTC}; skipping scheduled run."
-          fi
-
   capture_part1:
-    needs: guard
-    if: ${{ needs.guard.outputs.should_run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 320
     steps:
@@ -92,10 +65,7 @@ jobs:
           done
 
   capture_part2:
-    needs:
-      - guard
-      - capture_part1
-    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    needs: capture_part1
     runs-on: ubuntu-latest
     timeout-minutes: 320
     steps:
@@ -147,10 +117,7 @@ jobs:
           done
 
   capture_part3:
-    needs:
-      - guard
-      - capture_part2
-    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    needs: capture_part2
     runs-on: ubuntu-latest
     timeout-minutes: 320
     steps:
@@ -202,10 +169,7 @@ jobs:
           done
 
   capture_part4:
-    needs:
-      - guard
-      - capture_part3
-    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    needs: capture_part3
     runs-on: ubuntu-latest
     timeout-minutes: 320
     steps:
@@ -257,10 +221,7 @@ jobs:
           done
 
   capture_part5:
-    needs:
-      - guard
-      - capture_part4
-    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    needs: capture_part4
     runs-on: ubuntu-latest
     timeout-minutes: 260
     steps:
