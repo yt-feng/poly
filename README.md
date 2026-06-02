@@ -46,6 +46,28 @@ Behavior:
 - then captures another 3 hours
 - total coverage: 6 hours
 
+### 4. `polymarket-monthly-rolling-24h`
+
+Long-running workflow for monthly data collection.
+
+Behavior:
+
+- captures the next 24 hours in five sequential jobs
+- commits and pushes data every 30 minutes
+- starts the next 24-hour run automatically when the current run finishes
+- keeps running until the current workflow run is manually cancelled
+
+Manual start:
+
+```bash
+gh workflow run polymarket-monthly-rolling-24h.yml -f auto_continue=true
+```
+
+Manual stop:
+
+- cancel the currently running `polymarket-monthly-rolling-24h` run in GitHub Actions
+- a cancelled run does not start the next run
+
 ## Seed URL currently used in workflows
 
 ```text

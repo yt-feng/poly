@@ -2,11 +2,16 @@ name: polymarket-monthly-rolling-24h
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 7 * * *'
+    inputs:
+      auto_continue:
+        description: Start another 24-hour capture run after this one finishes.
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: polymarket-monthly-rolling-24h
@@ -271,3 +276,26 @@ jobs:
               echo "No data changes after chunk ${chunk}"
             fi
           done
+
+  continue_next_run:
+    name: Continue with next 24-hour run
+    needs:
+      - capture_part1
+      - capture_part2
+      - capture_part3
+      - capture_part4
+      - capture_part5
+    if: ${{ always() && inputs.auto_continue }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start next capture run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          echo "Starting next polymarket-monthly-rolling-24h run on ${BRANCH}"
+          gh workflow run polymarket-monthly-rolling-24h.yml \
+            --ref "${BRANCH}" \
+            -f auto_continue=true
