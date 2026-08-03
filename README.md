@@ -55,7 +55,7 @@ Behavior:
 - captures the next 24 hours in five sequential jobs
 - commits and pushes data every 30 minutes
 - starts the next 24-hour run automatically when the current run finishes
-- keeps running until the current workflow run is manually cancelled
+- is restarted by `polymarket-monthly-watchdog` if no monthly run is active
 
 Manual start:
 
@@ -65,8 +65,8 @@ gh workflow run polymarket-monthly-rolling-24h.yml -f auto_continue=true
 
 Manual stop:
 
-- cancel the currently running `polymarket-monthly-rolling-24h` run in GitHub Actions
-- a cancelled run does not start the next run
+- disable `polymarket-monthly-watchdog` in GitHub Actions
+- cancel any active or queued `polymarket-monthly-rolling-24h` runs
 
 ## Seed URL currently used in workflows
 

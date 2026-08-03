@@ -48,7 +48,8 @@ jobs:
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
               --sample-seconds "1" \
-              --output-csv "${OUT}"
+              --output-csv "${OUT}" \
+              --quiet
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part1 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
@@ -100,7 +101,8 @@ jobs:
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
               --sample-seconds "1" \
-              --output-csv "${OUT}"
+              --output-csv "${OUT}" \
+              --quiet
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part2 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
@@ -152,7 +154,8 @@ jobs:
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
               --sample-seconds "1" \
-              --output-csv "${OUT}"
+              --output-csv "${OUT}" \
+              --quiet
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part3 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
@@ -204,7 +207,8 @@ jobs:
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
               --sample-seconds "1" \
-              --output-csv "${OUT}"
+              --output-csv "${OUT}" \
+              --quiet
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part4 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
@@ -256,7 +260,8 @@ jobs:
               --mode "loop-next-hours" \
               --duration-hours "0.5" \
               --sample-seconds "1" \
-              --output-csv "${OUT}"
+              --output-csv "${OUT}" \
+              --quiet
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part5 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"

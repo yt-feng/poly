@@ -1,0 +1,47 @@
+name: polymarket-monthly-watchdog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: polymarket-monthly-watchdog
+  cancel-in-progress: true
+
+jobs:
+  ensure-running:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start monthly capture when idle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+          WORKFLOW_FILE: polymarket-monthly-rolling-24h.yml
+        run: |
+          set -euo pipefail
+
+          active_count="$(
+            gh run list \
+              --workflow "${WORKFLOW_FILE}" \
+              --limit 20 \
+              --json status \
+              --jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "requested" or .status == "pending")] | length'
+          )"
+
+          echo "Active monthly capture runs: ${active_count}"
+          if [ "${active_count}" != "0" ]; then
+            echo "Monthly capture is already active."
+            exit 0
+          fi
+
+          echo "No active monthly capture run found; starting one on ${BRANCH}."
+          gh workflow run "${WORKFLOW_FILE}" \
+            --ref "${BRANCH}" \
+            -f auto_continue=true

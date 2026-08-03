@@ -123,6 +123,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--target-slug", default="", help="Optional exact market slug to snapshot once, e.g. btc-updown-5m-1776759300")
     p.add_argument("--target-window-end-hm", default="", help="Optional Beijing HH:MM for the window end to snapshot once, e.g. 16:45 means window 16:40-16:45")
     p.add_argument("--output-csv", default="", help="Optional explicit csv output path.")
+    p.add_argument("--quiet", action="store_true", help="Do not print every captured row to stdout.")
     p.add_argument("--timeout", type=float, default=10.0)
     return p.parse_args()
 
@@ -720,7 +721,8 @@ def capture_once_current(args: argparse.Namespace, template_url: str, series_pre
     tracker = TradeTracker()
     row = snapshot_row(info, args.timeout, tracker)
     append_row(out_path, row)
-    print(json.dumps(row, ensure_ascii=False))
+    if not args.quiet:
+        print(json.dumps(row, ensure_ascii=False))
     return 0
 
 
@@ -737,7 +739,8 @@ def capture_loop_current_window(args: argparse.Namespace, template_url: str, ser
         try:
             row = snapshot_row(info, args.timeout, tracker)
             append_row(out_path, row)
-            print(json.dumps(row, ensure_ascii=False), flush=True)
+            if not args.quiet:
+                print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
             log(f"snapshot error at {now_bj.isoformat()}: {e}")
         time.sleep(max(args.sample_seconds, 0.2))
@@ -770,7 +773,8 @@ def capture_loop_range(args: argparse.Namespace, template_url: str, series_prefi
                 tracker = TradeTracker()
             row = snapshot_row(cached_info, args.timeout, tracker)
             append_row(out_path, row)
-            print(json.dumps(row, ensure_ascii=False), flush=True)
+            if not args.quiet:
+                print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
             log(f"snapshot error at {now_bj.isoformat()}: {e}")
         time.sleep(max(args.sample_seconds, 0.2))
@@ -796,7 +800,8 @@ def capture_loop_next_hours(args: argparse.Namespace, template_url: str, series_
                 tracker = TradeTracker()
             row = snapshot_row(cached_info, args.timeout, tracker)
             append_row(out_path, row)
-            print(json.dumps(row, ensure_ascii=False), flush=True)
+            if not args.quiet:
+                print(json.dumps(row, ensure_ascii=False), flush=True)
         except Exception as e:
             log(f"snapshot error at {now_bj.isoformat()}: {e}")
         time.sleep(max(args.sample_seconds, 0.2))
