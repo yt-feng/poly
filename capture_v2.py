@@ -268,14 +268,19 @@ class Collector:
         self.raw('polymarket_ws', payload, connection_id=connection_id)
 
     def chainlink_message(self, message, connection_id):
-        self.raw('chainlink_rtds', message, connection_id=connection_id)
         if not isinstance(message, dict):
             return
         payload = message.get('payload', {})
         if not isinstance(payload, dict):
             return
         symbol = str(payload.get('symbol', '')).split('/')[0].lower()
-        if symbol in self.assets and 'value' in payload and 'chainlink' in message.get('topic', ''):
+        if symbol not in self.assets:
+            return
+        self.raw('chainlink_rtds', message, connection_id=connection_id,
+                 event_ms=epoch_ms(payload.get('timestamp')))
+        # A subscribe-history batch may use a generic topic. Preserve it, but
+        # never relabel it as a verified live Chainlink price update.
+        if 'value' in payload and 'chainlink' in message.get('topic', ''):
             self.prices['chainlink_'+symbol] = dict(price=payload['value'],
                           received_ms=int(time.time()*1000), event_ms=epoch_ms(payload.get('timestamp')))
 
@@ -354,8 +359,10 @@ class Collector:
                     asyncio.create_task(self.socket('polymarket', POLY_WS, self.poly_message,
                                                      heartbeat=10, dynamic=True)),
                     asyncio.create_task(self.checkpoint())]
-            subscriptions = [{'topic': 'crypto_prices_chainlink', 'type': '*',
-                              'filters': json.dumps({'symbol': a+'/usd'})} for a in self.assets]
+            # The filtered RTDS route returned only a subscribe-history batch in
+            # live validation. Subscribe to the documented full Chainlink topic
+            # and retain only explicitly configured symbols in the handler.
+            subscriptions = [{'topic': 'crypto_prices_chainlink', 'type': '*'}]
             jobs.append(asyncio.create_task(self.socket('chainlink', CHAINLINK_WS,
                         self.chainlink_message, {'action': 'subscribe', 'subscriptions': subscriptions}, heartbeat=5)))
             for asset in self.assets:

@@ -31,6 +31,8 @@ jobs:
       - run: pip install -r requirements-v2.txt
       - name: Public feeds smoke test, no trading credentials
         run: python -u capture_v2.py --assets btc --seconds 90 --output smoke_v2 --require-core
+      - name: Verify separately labelled Chainlink live observations
+        run: python -c 'import json; h=json.load(open("smoke_v2/health.json")); assert h["valid_snapshot_counts"].get("chainlink",0) >= 5, h'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
