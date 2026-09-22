@@ -1,0 +1,43 @@
+name: daily-quality-v2
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: UTC date, YYYY-MM-DD; empty means yesterday
+        required: false
+        type: string
+  schedule:
+    - cron: '37 5 * * *'
+permissions:
+  contents: write
+concurrency:
+  group: daily-quality-v2
+  cancel-in-progress: false
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      DAY: ${{ inputs.date }}
+      CAPTURE_ASSETS: ${{ vars.CAPTURE_ASSETS || 'btc' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-v2.txt
+      - name: Verify archives and publish previous UTC-day coverage
+        run: |
+          extra=()
+          if [ -n "$DAY" ]; then extra=(--date "$DAY"); fi
+          python daily_quality_v2.py --assets "$CAPTURE_ASSETS" --publish --check "${extra[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-quality-v2-${{ github.run_id }}
+          path: |
+            daily_quality_output/*.json
+            daily_quality_output/*.md
+          retention-days: 30

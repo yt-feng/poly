@@ -1,0 +1,47 @@
+name: binance-backfill-v2
+on:
+  push:
+    branches: [main]
+    paths: ['binance_backfill_v2.py', '.github/workflows/binance-backfill-v2.yml']
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Earliest UTC date, inclusive
+        default: '2026-04-21'
+        type: string
+      symbols:
+        description: Explicit comma-separated spot symbols
+        default: BTCUSDT
+        type: string
+  schedule:
+    - cron: '41 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: binance-backfill-v2
+  cancel-in-progress: false
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      START: ${{ inputs.start || vars.BINANCE_BACKFILL_START || '2026-04-21' }}
+      SYMBOLS: ${{ inputs.symbols || vars.BINANCE_BACKFILL_SYMBOLS || 'BTCUSDT' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-v2.txt
+      - name: Resume checksummed official archives, up to 24 files and 1 GiB per run
+        run: |
+          python -u binance_backfill_v2.py --start "$START" --symbols "$SYMBOLS" \
+            --max-files 24 --max-attempts 48 --max-bytes 1073741824 --publish
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: binance-backfill-v2-status-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backfill_v2_output/*.json
+          retention-days: 7

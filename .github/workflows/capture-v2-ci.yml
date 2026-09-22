@@ -1,0 +1,39 @@
+name: capture-v2-ci
+on:
+  pull_request:
+    paths: ['*v2.py', 'requirements-v2.txt', 'tests/test_capture_v2.py', '.github/workflows/*v2*.yml']
+  push:
+    branches: ['improve/capture-v2-20260923']
+    paths: ['*v2.py', 'requirements-v2.txt', 'tests/test_capture_v2.py', '.github/workflows/*v2*.yml']
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-v2.txt
+      - run: python -m unittest discover -s tests -p 'test_capture_v2.py' -v
+      - run: python -m py_compile archive_v2.py capture_v2.py quality_v2.py daily_quality_v2.py binance_backfill_v2.py
+  live-smoke:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-v2.txt
+      - name: Public feeds smoke test, no trading credentials
+        run: python -u capture_v2.py --assets btc --seconds 90 --output smoke_v2 --require-core
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-v2-smoke-${{ github.run_id }}
+          path: smoke_v2/
+          retention-days: 7
