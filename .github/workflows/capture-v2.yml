@@ -1,0 +1,52 @@
+name: capture-v2
+on:
+  push:
+    branches: [main]
+    paths: ['capture_v2.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: capture-v2-production
+  cancel-in-progress: false
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 260
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CAPTURE_ASSETS: ${{ vars.CAPTURE_ASSETS || 'btc' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-v2.txt
+      - run: python -m unittest discover -s tests -p 'test_capture_v2.py' -v
+      - name: Four-hour capture with durable rolling release checkpoints
+        run: |
+          python -u capture_v2.py \
+            --assets "$CAPTURE_ASSETS" --seconds 14400 \
+            --output capture_v2_output \
+            --release "capture-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --require-core
+      - name: Preserve diagnostics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-v2-health-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            capture_v2_output/*.json
+            capture_v2_output/*.md
+          retention-days: 7
+      - name: Emergency copy when publication or capture fails
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: capture-v2-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: capture_v2_output/
+          retention-days: 7
+          compression-level: 0
