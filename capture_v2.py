@@ -53,6 +53,22 @@ def decode_list(value):
     return json.loads(value) if isinstance(value, str) else value
 
 
+def decode_frame(text: str):
+    """Return a control kind or a structured message without inventing data."""
+    text = text.strip().lstrip('\ufeff').strip()
+    if not text:
+        return 'empty', None
+    if text.lower() in ('ping', 'pong'):
+        return text.lower(), None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return 'non_json', text
+    if not isinstance(payload, (dict, list)):
+        return 'control', payload
+    return 'data', payload
+
+
 def book_summary(payload: dict) -> dict:
     out = {}
     for side, reverse in [('bids', True), ('asks', False)]:
@@ -161,7 +177,7 @@ class Collector:
             deadline = next_tick(deadline, time.monotonic())
             await asyncio.sleep(max(0, deadline-time.monotonic()))
 
-    async def heartbeat(self, ws, seconds, subscriptions=None):
+    async def heartbeat(self, ws, seconds, subscriptions=None, ping_text='PING'):
         known = set()
         while True:
             if subscriptions:
@@ -174,7 +190,7 @@ class Collector:
                         if ids:
                             await ws.send_json({'operation': operation, 'assets_ids': sorted(ids)})
                 known = wanted
-            await ws.send_str('PING')
+            await ws.send_str(ping_text)
             await asyncio.sleep(seconds)
 
     async def socket(self, source, url, handler, subscribe=None, heartbeat=0, dynamic=False):
@@ -190,17 +206,24 @@ class Collector:
                     if subscribe:
                         await ws.send_json(subscribe)
                     if heartbeat:
-                        heart = asyncio.create_task(self.heartbeat(ws, heartbeat, dynamic))
+                        heart = asyncio.create_task(self.heartbeat(
+                            ws, heartbeat, dynamic, 'ping' if source == 'chainlink' else 'PING'))
                     while True:
                         if heart and heart.done():
                             await heart
                         msg = await asyncio.wait_for(ws.receive(), timeout=45)
                         if msg.type == aiohttp.WSMsgType.TEXT:
-                            if msg.data in ('PING', 'PONG', 'ping', 'pong'):
-                                if msg.data.lower() == 'ping':
-                                    await ws.send_str('PONG' if msg.data == 'PING' else 'pong')
+                            kind, payload = decode_frame(msg.data)
+                            if kind in ('empty', 'ping', 'pong'):
+                                if kind == 'ping':
+                                    await ws.send_str('pong' if source == 'chainlink' else 'PONG')
                                 continue
-                            payload = json.loads(msg.data)
+                            if kind != 'data':
+                                self.raw('protocol_control', {'source': source, 'kind': kind,
+                                         'text': msg.data}, connection_id=connection_id)
+                                if kind == 'non_json':
+                                    self.error(source+'_protocol', repr(msg.data[:200]))
+                                continue
                             handler(payload, connection_id)
                             attempt = 0
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE,
@@ -246,7 +269,11 @@ class Collector:
 
     def chainlink_message(self, message, connection_id):
         self.raw('chainlink_rtds', message, connection_id=connection_id)
+        if not isinstance(message, dict):
+            return
         payload = message.get('payload', {})
+        if not isinstance(payload, dict):
+            return
         symbol = str(payload.get('symbol', '')).split('/')[0].lower()
         if symbol in self.assets and 'value' in payload and 'chainlink' in message.get('topic', ''):
             self.prices['chainlink_'+symbol] = dict(price=payload['value'],
