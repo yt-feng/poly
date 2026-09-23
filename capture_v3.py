@@ -15,25 +15,31 @@ from archive_v2 import Archive
 from capture_v2 import Collector, ASSETS, CLOB
 from microstructure_v3 import Microstructure
 from microstructure_math_v3 import server_time_text
+from market_ws_guard import MarketWSGuard, market_socket, current_tokens
 
 
 class FeatureArchive(Archive):
-    def __init__(self, root, feature_engine):
+    def __init__(self, root, feature_engine, collector):
         super().__init__(root)
         self.feature_engine = feature_engine
+        self.collector = collector
 
     def write(self, kind, row):
         if kind == 'snapshots':
             row = self.feature_engine.enrich(row)
+            guard = self.collector.ws_guard.summary(current_tokens(self.collector), time.monotonic())
+            row['poly_ws_health'] = guard
+            row['poly_ws_data_valid'] = bool(self.collector.connected.get('polymarket')) and guard['all_current_tokens_fresh']
         super().write(kind,row)
 
 
 class CollectorV3(Collector):
     def __init__(self, assets, root, release=None):
         super().__init__(assets,root,release)
+        self.ws_guard = MarketWSGuard()
         self.micro = Microstructure(self)
         # The parent archive is still empty at this point; no existing file is replaced.
-        self.archive = FeatureArchive(root,self.micro)
+        self.archive = FeatureArchive(root,self.micro,self)
 
     def raw(self,source,payload,*,connection_id=None,event_ms=None):
         self.counts[source] += 1
@@ -41,6 +47,10 @@ class CollectorV3(Collector):
         self.archive.write('raw',dict(schema_version=3,source=source,received_at_ns=ns,
              received_monotonic_ns=mono,source_event_ms=event_ms,connection_id=connection_id,payload=payload))
         try:
+            if source == 'polymarket_rest_book':
+                self.ws_guard.rest_book(payload, mono/1e9)
+            elif source == 'polymarket_ws':
+                self.ws_guard.ws_book(payload, mono/1e9)
             self.micro.ingest(source,payload,connection_id,event_ms,ns//1000000)
         except (ValueError,TypeError,KeyError,OverflowError) as exc:
             self.micro.parse_errors += 1
@@ -72,6 +82,11 @@ class CollectorV3(Collector):
             self.raw('http_timing',dict(host=urlparse(url).hostname,path=urlparse(url).path,
                      elapsed_ms=(time.monotonic_ns()-start)/1000000,status=status,error=error))
 
+    async def socket(self, source, url, handler, subscribe=None, heartbeat=0, dynamic=False):
+        if source == 'polymarket':
+            return await market_socket(self, url, handler)
+        return await super().socket(source, url, handler, subscribe, heartbeat, dynamic)
+
     async def discover(self):
         # Both sets of tasks are owned and cancelled by the same v2 runner lifecycle.
         async with asyncio.TaskGroup() as group:
@@ -81,6 +96,7 @@ class CollectorV3(Collector):
     def health(self):
         h = super().health()
         h['microstructure'] = self.micro.health()
+        h['poly_ws_health'] = self.ws_guard.summary(current_tokens(self), time.monotonic())
         return h
 
 
