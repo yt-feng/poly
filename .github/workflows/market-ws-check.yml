@@ -1,0 +1,37 @@
+name: market-ws-check
+on:
+  pull_request:
+    paths: ['capture_v3.py', 'market_ws_guard.py', 'validate_market_ws.py', 'tests/test_market_ws_guard.py', '.github/workflows/market-ws-check.yml']
+  push:
+    branches: [main]
+    paths: ['capture_v3.py', 'market_ws_guard.py', 'validate_market_ws.py', 'tests/test_market_ws_guard.py', '.github/workflows/market-ws-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  current-token-stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-v2.txt
+      - name: Regression tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Public feed capture across five-minute rollover
+        run: python -u capture_v3.py --assets btc --seconds 360 --output ws_smoke --require-core
+      - name: Check current-token data, not just PONGs
+        if: always()
+        run: python validate_market_ws.py --root ws_smoke --require
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: market-ws-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ws_smoke/
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
