@@ -6,13 +6,15 @@ under microstructure (schema 3); delayed labels are archived in separate files.
 from __future__ import annotations
 import argparse
 import asyncio
+import aiohttp
 import json
 from pathlib import Path
 import time
 from urllib.parse import urlparse
 from archive_v2 import Archive
-from capture_v2 import Collector, ASSETS
+from capture_v2 import Collector, ASSETS, CLOB
 from microstructure_v3 import Microstructure
+from microstructure_math_v3 import server_time_text
 
 
 class FeatureArchive(Archive):
@@ -51,6 +53,17 @@ class CollectorV3(Collector):
         start = time.monotonic_ns()
         status,error = 200,None
         try:
+            if url == CLOB+'/time':
+                host = urlparse(url).hostname
+                if time.monotonic() < self.cooldown.get(host,0):
+                    raise RuntimeError(f'{host}: server-directed cooldown')
+                async with self.session.get(url,params=params,timeout=aiohttp.ClientTimeout(total=5)) as r:
+                    status = r.status
+                    if status in (403,418,429,451):
+                        retry = r.headers.get('Retry-After','300')
+                        self.cooldown[host] = time.monotonic()+max(60,int(retry) if retry.isdigit() else 300)
+                    r.raise_for_status()
+                    return server_time_text(await r.text())
             return await super().get(url,params)
         except Exception as exc:
             status,error = getattr(exc,'status',None),str(exc)[:200]

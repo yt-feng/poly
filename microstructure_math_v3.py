@@ -146,7 +146,8 @@ def market_reference(market, received_ms):
             break
     identity = {k: market.get(k) for k in ('conditionId','description','resolutionSource','cryptoMarketConfig','feeSchedule','feesEnabled')}
     return {'slug': slug, 'condition_id': market.get('conditionId'), 'published_price_to_beat': strike,
-            'price_to_beat_path': path, 'metadata_received_ms': received_ms,
+            'price_to_beat_path': path, 'price_to_beat_received_ms': received_ms if strike else None,
+            'metadata_received_ms': received_ms,
             'resolution_source': source, 'twap_lookback_seconds': lookback,
             'reference_kind': f'chainlink_twap_{int(lookback)}' if lookback else ('chainlink_spot' if 'chain.link' in source and 'twap' not in source.lower() else 'unknown'),
             'rules_sha256': hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest(),
@@ -233,3 +234,39 @@ class RollingPrices:
                               'return_bps': (rows[-1][1]/rows[0][1]-1)*10000 if warmed and rows[0][1] else None,
                               'valid_intervals': len(pairs), 'warmed': warmed}
         return out
+
+
+def event_reference(market, reference, detail):
+    """Use only an explicitly matching full Gamma event; retain true availability."""
+    r = dict(reference)
+    if not detail or detail.get('received_ms', 0) > reference['metadata_received_ms']:
+        return r
+    event = detail.get('payload')
+    if not isinstance(event, dict) or event.get('slug') != market.get('slug'):
+        return r
+    matches = [m for m in event.get('markets', []) if m.get('slug') == market.get('slug')
+               and m.get('conditionId') == market.get('conditionId') and m.get('conditionId')]
+    if not matches:
+        return r
+    meta = event.get('eventMetadata') or {}
+    value = decimal(meta.get('priceToBeat')) if isinstance(meta,dict) else None
+    if value is not None and value > 0:
+        if r.get('published_price_to_beat') is not None and decimal(r['published_price_to_beat']) != value:
+            r.update(published_price_to_beat=None,price_to_beat_path=None,price_to_beat_received_ms=None,
+                     price_to_beat_conflict=True)
+        else:
+            r.update(published_price_to_beat=str(value),
+                price_to_beat_path='gamma.events/slug/{slug}.eventMetadata.priceToBeat',
+                price_to_beat_received_ms=detail['received_ms'])
+    return r
+
+
+def server_time_text(text):
+    """CLOB /time is numeric text/plain. HTML, objects and nonfinite values fail."""
+    text = text.strip()
+    if not text.isdigit():
+        raise ValueError('Expected numeric server epoch, not a JSON object or HTML')
+    value = int(text)
+    if not 10**9 <= value <= 10**14:
+        raise ValueError('Server time outside supported epoch range')
+    return value

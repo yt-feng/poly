@@ -12,7 +12,7 @@ import time
 import aiohttp
 from capture_v2 import CLOB, GAMMA, ASSETS, BINANCE_WS, CHAINLINK_WS, epoch_ms, window_slug
 from microstructure_math_v3 import (number, decimal, book_features, fee_config, pair_quotes,
-                                   market_reference, twap_price, TradeFlow, RollingPrices, ofi)
+                                   market_reference, twap_price, TradeFlow, RollingPrices, ofi, event_reference)
 
 FUTURES_REST = 'https://fapi.binance.com'
 FUTURES_MARKET = 'wss://fstream.binance.com/market/stream?streams='
@@ -43,6 +43,7 @@ class Microstructure:
         self.last_valid, self.errors, self.latency = {}, {}, defaultdict(lambda: deque(maxlen=300))
         self.connections, self.market_due, self.clob_due = {}, {}, {}
         self.related = None
+        self.event_details = {}
         self.labels_seen, self.markouts = {}, deque()
         self.clock, self.last_data_trade = {}, {}
         self.last_liquidation = None
@@ -83,18 +84,20 @@ class Microstructure:
                           {'schema_version': 3, 'kind': typ, 'available_at_ms': received_ms,
                            'connection_id': connection_id, 'payload': data})
         elif source == 'http_timing':
-            self.latency[payload['host']].append(payload['elapsed_ms'])
+            if payload.get('status') == 200 and not payload.get('error'):
+                self.latency[payload['host']].append(payload['elapsed_ms'])
 
     def set_market(self, market, ms):
         slug = market.get('slug')
         if not slug or not slug.startswith('btc-updown-'):
             return
-        self.rules[slug] = market_reference(market, ms)
+        self.rules[slug] = event_reference(market, market_reference(market, ms), self.event_details.get(slug))
         # Keep at most two hours of as-of rule observations in memory.
         cutoff = int(time.time())-7200
         for k in list(self.rules):
             if k.rsplit('-',1)[-1].isdigit() and int(k.rsplit('-',1)[-1]) < cutoff:
                 self.rules.pop(k, None)
+                self.event_details.pop(k, None)
         live_tokens = {str(t) for tokens in self.c.markets.values() for t in tokens.values()}
         self.poly_books = {k:v for k,v in self.poly_books.items() if k in live_tokens}
         self.previous_books = {k:v for k,v in self.previous_books.items() if k in live_tokens}
@@ -136,6 +139,8 @@ class Microstructure:
         elif kind == 'chainlink_twap':
             topic = message.get('topic')
             p = message.get('payload', {})
+            if not isinstance(p, dict):
+                raise ValueError('Expected TWAP payload object')
             if topic in TOPICS and p.get('symbol') == 'btc/usd':
                 window = TOPICS[topic]
                 if p.get('window_s', window) != window:
@@ -191,8 +196,17 @@ class Microstructure:
                     self.market_due[slug] = now+60
                     continue
                 m = data[0]
-                ms = int(time.time()*1000)
                 self.c.raw('micro_market_rules',{'slug':slug,'market':m})
+                # /markets has a compact events projection that can omit eventMetadata.
+                # Fetch the documented full event, never substitute an exchange quote.
+                try:
+                    event = await self.c.get(GAMMA+'/events/slug/'+slug)
+                    ems = int(time.time()*1000)
+                    self.c.raw('micro_event_details',{'slug':slug,'event':event})
+                    self.event_details[slug] = obs(event,ems)
+                except OPTIONAL_ERRORS as exc:
+                    self.c.error('micro_event_details',exc)
+                ms = int(time.time()*1000)
                 self.set_market(m,ms)
                 current = int(slug.rsplit('-',1)[1])+300 > now
                 self.market_due[slug] = now+(30 if current else 120)
@@ -439,7 +453,9 @@ class Microstructure:
                 ref = self.external.get(key) if gates[key] else None
             elif kind == 'chainlink_spot' and row['chainlink_valid']:
                 ref = row['chainlink']
-        reference_valid = bool(ref and rule_valid and rule['published_price_to_beat'])
+        gates['matching_reference_feed'] = bool(ref and rule_valid)
+        gates['official_threshold'] = bool(rule_valid and rule['published_price_to_beat'])
+        reference_valid = gates['matching_reference_feed'] and gates['official_threshold']
         gates['resolution_reference'] = reference_valid
         micro['matching_resolution_reference'] = ref
         strike = number(rule['published_price_to_beat']) if rule_valid else None
@@ -461,7 +477,7 @@ class Microstructure:
         micro['valid'] = gates
         row['microstructure'] = micro
         row['official_price_to_beat'] = rule['published_price_to_beat'] if rule_valid else None
-        row['official_price_to_beat_provenance'] = {'path':rule['price_to_beat_path'],'received_ms':rule['metadata_received_ms']} if rule_valid else None
+        row['official_price_to_beat_provenance'] = {'path':rule['price_to_beat_path'],'received_ms':rule.get('price_to_beat_received_ms')} if rule_valid else None
         # Never put a delayed winner or settlement observation into prior features.
         for k,ok in gates.items():
             row[k+'_valid'] = ok
