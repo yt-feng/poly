@@ -2,7 +2,7 @@ name: capture-v2
 on:
   push:
     branches: [main]
-    paths: ['capture_v2.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
+    paths: ['capture_v2.py', '*v3.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
   workflow_dispatch:
   schedule:
     - cron: '23 * * * *'
@@ -25,10 +25,10 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements-v2.txt
-      - run: python -m unittest discover -s tests -p 'test_capture_v2.py' -v
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Four-hour capture with durable rolling release checkpoints
         run: |
-          python -u capture_v2.py \
+          python -u capture_v3.py \
             --assets "$CAPTURE_ASSETS" --seconds 14400 \
             --output capture_v2_output \
             --release "capture-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \

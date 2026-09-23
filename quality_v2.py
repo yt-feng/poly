@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from archive_v2 import atomic_json
 
+EXTRA = ('rules','fee_model','pair_quote','twap30','twap60','resolution_reference','spot_depth20','coinbase','coinbase_l2','fx','perp','perp_book','open_interest')
+
 
 def longest_gap(seconds: set[int], start: int, end: int) -> int:
     points = [start - 1, *sorted(s for s in seconds if start <= s < end), end]
@@ -34,6 +36,9 @@ def summarize(rows, requested_day: str | None = None, assets=('btc',)) -> dict:
         g['seconds'].add(ms // 1000)
         for source in ('poly', 'binance', 'chainlink'):
             g['valid_' + source] += int(bool(row.get(source + '_valid')))
+        for source in EXTRA:
+            g['valid_'+source] = g.get('valid_'+source,0)+int(bool(row.get(source+'_valid')))
+        g['microstructure_rows'] = g.get('microstructure_rows',0)+int('microstructure' in row)
         g['lag_max_ms'] = max(g['lag_max_ms'], row.get('sampler_lag_ms', 0))
     if requested_day:
         for asset in assets:
@@ -70,6 +75,11 @@ def report(root: Path, output: Path, day=None, assets=('btc',)) -> dict:
         text.append(f"| {x['date_utc']} | {x['asset']} | {x['observed_seconds']} | "
                     f"{x['daily_coverage']:.2%} | {x['longest_gap_seconds']} | "
                     f"{x['valid_poly']} / {x['valid_binance']} / {x['valid_chainlink']} |")
+    text += ['', '## BTC microstructure source coverage', '', '| UTC day | Asset | V3 rows | Rules / fees / matching resolution | Coinbase / spot depth20 / futures |', '|---|---|---:|---:|---:|']
+    for x in result['daily']:
+        text.append(f"| {x['date_utc']} | {x['asset']} | {x.get('microstructure_rows',0)} | "
+                    f"{x.get('valid_rules',0)} / {x.get('valid_fee_model',0)} / {x.get('valid_resolution_reference',0)} | "
+                    f"{x.get('valid_coinbase',0)} / {x.get('valid_spot_depth20',0)} / {x.get('valid_perp',0)} |")
     output.with_suffix('.md').write_text('\n'.join(text) + '\n')
     return result
 
