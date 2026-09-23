@@ -1,10 +1,10 @@
 name: capture-v2-ci
 on:
   pull_request:
-    paths: ['*v2.py', 'requirements-v2.txt', 'tests/*v2.py', '.github/workflows/*v2*.yml']
+    paths: ['*v2.py', '*v3.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
   push:
-    branches: ['improve/capture-v2-20260923']
-    paths: ['*v2.py', 'requirements-v2.txt', 'tests/*v2.py', '.github/workflows/*v2*.yml']
+    branches: ['improve/**']
+    paths: ['*v2.py', '*v3.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
 permissions:
   contents: read
 jobs:
@@ -17,8 +17,8 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements-v2.txt
-      - run: python -m unittest discover -s tests -p 'test_*v2.py' -v
-      - run: python -m py_compile archive_v2.py capture_v2.py quality_v2.py daily_quality_v2.py binance_backfill_v2.py
+      - run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - run: python -m py_compile archive_v2.py capture_v2.py quality_v2.py daily_quality_v2.py binance_backfill_v2.py capture_v3.py microstructure_v3.py microstructure_math_v3.py
   live-smoke:
     needs: unit
     runs-on: ubuntu-latest
@@ -30,7 +30,7 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements-v2.txt
       - name: Public feeds smoke test, no trading credentials
-        run: python -u capture_v2.py --assets btc --seconds 90 --output smoke_v2 --require-core
+        run: python -u capture_v3.py --assets btc --seconds 120 --output smoke_v2 --require-core --require-microstructure
       - name: Verify separately labelled Chainlink live observations
         run: python -c 'import json; h=json.load(open("smoke_v2/health.json")); assert h["valid_snapshot_counts"].get("chainlink",0) >= 5, h'
       - uses: actions/upload-artifact@v4

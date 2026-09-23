@@ -39,6 +39,15 @@ jobs:
         run: |
           python -u binance_backfill_v2.py --start "$START" --symbols "$SYMBOLS" \
             --max-files 24 --max-attempts 48 --max-bytes 1073741824 --publish
+          cp backfill_v2_output/backfill-summary.json backfill_v2_output/backfill-summary-spot.json
+          gh release upload binance-v2-backfill-state backfill_v2_output/backfill-summary-spot.json --clobber
+      - name: Resume BTC perpetual archives within an additional 512 MiB budget
+        run: |
+          python -u binance_backfill_v2.py --start "$START" --symbols BTCUSDT \
+            --market futures/um --datasets trades,aggTrades,klines_1m \
+            --max-files 12 --max-attempts 24 --max-bytes 536870912 --publish
+          cp backfill_v2_output/backfill-summary.json backfill_v2_output/backfill-summary-futures-um.json
+          gh release upload binance-v2-backfill-state backfill_v2_output/backfill-summary-futures-um.json --clobber
       - uses: actions/upload-artifact@v4
         if: always()
         with:
