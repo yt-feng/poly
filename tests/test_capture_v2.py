@@ -196,5 +196,19 @@ class FeedIsolationTests(unittest.TestCase):
             c.archive.close()
 
 
+class HealthLifecycleTests(unittest.TestCase):
+    def test_pre_shutdown_live_health_is_retained_separately(self):
+        with tempfile.TemporaryDirectory() as d:
+            c = Collector(['btc'], Path(d))
+            live = c.health()
+            self.assertNotIn('pre_shutdown_live_health', live)
+            c.pre_shutdown_live_health = live
+            final = c.health()
+            self.assertIn('pre_shutdown_live_health', final)
+            self.assertEqual(final['pre_shutdown_live_health']['started_ms'], c.started_ms)
+            self.assertIsNot(final['pre_shutdown_live_health'], final)
+            c.archive.close()
+
+
 if __name__ == '__main__':
     unittest.main()
