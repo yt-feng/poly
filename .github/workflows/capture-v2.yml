@@ -14,7 +14,9 @@ concurrency:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    timeout-minutes: 260
+    # The collector itself runs for four hours; leave bounded headroom for setup,
+    # final checksum/report generation, and retrying durable release uploads.
+    timeout-minutes: 300
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
