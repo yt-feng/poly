@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from unittest.mock import Mock
 from aiohttp.http_exceptions import LineTooLong
 from aiohttp.http_parser import HttpResponseParserPy
 from capture_v3 import OFFICIAL_PAGE_HEADER_LIMIT
@@ -129,7 +130,7 @@ class OfficialHeaderTests(unittest.TestCase):
         response = b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Security-Policy: '+b'a'*10000+b'\r\n\r\n'
         with self.assertRaises(LineTooLong):
             HttpResponseParserPy().feed_data(response)
-        messages, _, _ = HttpResponseParserPy(max_line_size=OFFICIAL_PAGE_HEADER_LIMIT,
+        messages, _, _ = HttpResponseParserPy(protocol=Mock(), loop=Mock(), max_line_size=OFFICIAL_PAGE_HEADER_LIMIT,
                                              max_field_size=OFFICIAL_PAGE_HEADER_LIMIT).feed_data(response)
         self.assertEqual(messages[0][0].code, 200)
 
