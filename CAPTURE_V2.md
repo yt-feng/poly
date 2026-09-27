@@ -5,7 +5,10 @@
 The legacy `polymarket_quotes.py` and its CSV files are retained unchanged for
 compatibility and side-by-side validation. The new **capture-v2** workflow is an
 independent production data path. A merge affecting its files starts it, and an
-hourly scheduled trigger keeps a pending successor behind the four-hour run.
+completion event starts a successor through `capture-v2-watchdog`. An independent
+hourly watchdog schedule recovers interrupted chains. The watchdog does not
+dispatch while a capture is queued or running and stops fast restart loops
+(three starts in 15 minutes). Disable both workflows to intentionally stop capture.
 Concurrency prevents overlapping v2 production runs. GitHub scheduling and runner
 handoffs still create possible gaps; this is not an exchange-grade zero-loss SLA.
 
@@ -76,6 +79,15 @@ is a bootstrap destination, **not** an unlimited all-symbol data lake. Before
 large-scale expansion, add object storage and resource budgets. Neither existing
 CSV history nor existing releases are deleted by these workflows.
 
+Shutdown preserves `pre_shutdown_live_health` before clearing connections,
+retries cancelled feed tasks with bounded waits and records stalled task
+names/stacks in `shutdown.json`. Checkpoint upload threads are drained before
+final publication so two uploaders cannot overwrite each other's progress. Each
+capture upload command has a 60-second timeout; all final publication calls share
+one 10-minute deadline, and the workflow has a 255-minute process deadline with a
+30-second interrupt grace period. Failed or cancelled jobs retain a recovery
+artifact. Missing historical Polymarket observations remain gaps.
+
 ## Historical backfill
 
 Every hour the bounded job resumes original `trades`, `aggTrades`, `1s` and `1m`
@@ -114,6 +126,18 @@ Binance coverage below 95% fails the quality job **after** publishing its report
 A partial deployment day is expected to show partial coverage. Chainlink validity
 is separately visible; core coverage does not establish Chainlink completeness.
 The report audits sampled snapshots, not every exchange event or every sequence.
+
+The September 26 incident illustrates why a passing short smoke test is not
+enough: a four-hour sampler stopped, but task shutdown held the concurrency slot
+for another hour until the job timeout. Its final snapshot segment stayed open.
+Other completed runs had no prompt successor when scheduled events were delayed.
+The September 26 quality report correctly failed at 75,212/86,400 observed seconds
+(87.05%, longest gap 4,919 seconds); changing code cannot repair those observations.
+Regression coverage now includes delayed cancellation, overlapping publisher
+shutdown, repeated lifecycles, duplicate continuation events, restart loops, and
+two-day midnight/gap accounting. Production acceptance still requires a finished
+four-hour run, its durable final segment, the next run, and a subsequent full UTC
+day passing the unchanged 95% gate.
 
 `health.json` also exposes per-source/per-asset last-valid timestamps, errors,
 connection status, and raw message counts. GitHub workflow success alone must not

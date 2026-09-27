@@ -12,6 +12,7 @@ import json
 import math
 from pathlib import Path
 import time
+import threading
 import uuid
 from urllib.parse import urlparse
 import aiohttp
@@ -105,6 +106,9 @@ class Collector:
         self.last_valid_ms = {}
         self.started_ms = int(time.time()*1000)
         self.session = None
+        self.upload_task = None
+        self.upload_stop = threading.Event()
+        self.pre_shutdown_live_health = None
 
     def raw(self, source: str, payload, *, connection_id=None, event_ms=None):
         self.counts[source] += 1
@@ -211,7 +215,10 @@ class Collector:
                     while True:
                         if heart and heart.done():
                             await heart
-                        msg = await asyncio.wait_for(ws.receive(), timeout=45)
+                        # Keep receive in this task: cancellation must not race
+                        # completion of the child task created by wait_for.
+                        async with asyncio.timeout(45):
+                            msg = await ws.receive()
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             kind, payload = decode_frame(msg.data)
                             if kind in ('empty', 'ping', 'pong'):
@@ -335,43 +342,75 @@ class Collector:
             await asyncio.sleep(max(0, deadline-time.monotonic()))
 
     def health(self):
-        return dict(schema_version=2, updated_ms=int(time.time()*1000), started_ms=self.started_ms,
+        health = dict(schema_version=2, updated_ms=int(time.time()*1000), started_ms=self.started_ms,
                     latest_sample_ms=self.latest_sample_ms, assets=self.assets,
                     connected=self.connected.copy(), raw_counts=dict(self.counts),
                     valid_snapshot_counts=dict(self.valid), last_valid_ms=self.last_valid_ms.copy(),
                     last_errors=self.last_error.copy())
+        if self.pre_shutdown_live_health is not None:
+            health['pre_shutdown_live_health'] = self.pre_shutdown_live_health
+        return health
 
     async def checkpoint(self):
         while True:
             atomic_json(self.root/'health.json', self.health())
             if self.release:
                 try:
-                    await asyncio.to_thread(upload_ready, self.root, self.release)
-                    await asyncio.to_thread(publish, self.release, [self.root/'health.json'], replace=True)
+                    self.upload_task = asyncio.create_task(asyncio.to_thread(self.publish_checkpoint))
+                    # Cancelling the coroutine cannot stop a running thread.
+                    # Keep its handle so final publication can drain it first.
+                    await asyncio.shield(self.upload_task)
                 except Exception as e:
                     self.error('publication', e)
             await asyncio.sleep(60)
 
+    def publish_checkpoint(self):
+        upload_ready(self.root, self.release, stop=self.upload_stop)
+        if not self.upload_stop.is_set():
+            publish(self.release, [self.root/'health.json'], replace=True, timeout=60)
+
+    async def stop_tasks(self, tasks, grace=10):
+        """Bound each cancellation wait and record the exact stalled task."""
+        pending = set(tasks)
+        for attempt in range(3):
+            for task in pending:
+                task.cancel()
+            done, pending = await asyncio.wait(pending, timeout=grace)
+            # Retrieve exceptions without an unbounded gather.
+            for task in done:
+                if not task.cancelled():
+                    task.exception()
+            if not pending:
+                return
+            details = {task.get_name(): [f'{f.f_code.co_filename}:{f.f_lineno}'
+                       for f in task.get_stack()] for task in pending}
+            atomic_json(self.root/'shutdown.json', {'attempt': attempt+1, 'pending': details})
+            print('Retrying stalled capture shutdown: '+json.dumps(details), flush=True)
+            # Closing transports also wakes a socket waiting for a peer close.
+            if self.session is not None:
+                await self.session.close()
+        raise RuntimeError('Capture tasks did not stop; see shutdown.json')
+
     async def run(self, duration):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15),
                       headers={'User-Agent': 'poly-capture-v2/2.0'}) as self.session:
-            jobs = [asyncio.create_task(self.discover()), asyncio.create_task(self.poll_books()),
+            jobs = [asyncio.create_task(self.discover(), name='discover'), asyncio.create_task(self.poll_books(), name='poll-books'),
                     asyncio.create_task(self.socket('polymarket', POLY_WS, self.poly_message,
-                                                     heartbeat=10, dynamic=True)),
-                    asyncio.create_task(self.checkpoint())]
+                                                     heartbeat=10, dynamic=True), name='polymarket'),
+                    asyncio.create_task(self.checkpoint(), name='checkpoint')]
             # The filtered RTDS route returned only a subscribe-history batch in
             # live validation. Subscribe to the documented full Chainlink topic
             # and retain only explicitly configured symbols in the handler.
             subscriptions = [{'topic': 'crypto_prices_chainlink', 'type': '*'}]
             jobs.append(asyncio.create_task(self.socket('chainlink', CHAINLINK_WS,
-                        self.chainlink_message, {'action': 'subscribe', 'subscriptions': subscriptions}, heartbeat=5)))
+                        self.chainlink_message, {'action': 'subscribe', 'subscriptions': subscriptions}, heartbeat=5), name='chainlink'))
             for asset in self.assets:
                 streams = '/'.join(ASSETS[asset].lower()+'@'+s for s in
                           ('trade', 'aggTrade', 'bookTicker', 'depth@100ms', 'kline_1s', 'kline_1m'))
                 jobs.append(asyncio.create_task(self.socket('binance_'+asset, BINANCE_WS+streams,
-                     lambda p, c, a=asset: self.binance_message(a, p, c))))
-                jobs.append(asyncio.create_task(self.depth_snapshots(asset)))
-            sampler = asyncio.create_task(self.sample(duration))
+                     lambda p, c, a=asset: self.binance_message(a, p, c)), name='binance-'+asset))
+                jobs.append(asyncio.create_task(self.depth_snapshots(asset), name='depth-'+asset))
+            sampler = asyncio.create_task(self.sample(duration), name='sampler')
             try:
                 done, _ = await asyncio.wait([sampler, *jobs], return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
@@ -379,16 +418,27 @@ class Collector:
                 if sampler not in done:
                     raise RuntimeError('A collector task exited unexpectedly')
             finally:
-                for task in [sampler, *jobs]:
-                    task.cancel()
-                await asyncio.gather(sampler, *jobs, return_exceptions=True)
-                self.archive.close()
-                atomic_json(self.root/'health.json', self.health())
-                report(self.root, self.root/'quality.json', assets=self.assets)
+                self.pre_shutdown_live_health = self.health()
+                publication_deadline = time.monotonic()+600
+                self.upload_stop.set()
+                try:
+                    await self.stop_tasks([sampler, *jobs])
+                finally:
+                    self.archive.close()
+                    atomic_json(self.root/'health.json', self.health())
+                    report(self.root, self.root/'quality.json', assets=self.assets)
+                    if self.upload_task is not None:
+                        # No overlapping writers to the upload checkpoint or
+                        # manifest, even if cancellation hit a running gh call.
+                        try:
+                            await self.upload_task
+                        except Exception as exc:
+                            print('Checkpoint upload failed; retrying final publication: '+str(exc), flush=True)
                 if self.release:
-                    await asyncio.to_thread(upload_ready, self.root, self.release)
+                    await asyncio.to_thread(upload_ready, self.root, self.release, deadline=publication_deadline)
                     await asyncio.to_thread(publish, self.release,
-                         [self.root/'health.json', self.root/'quality.json', self.root/'quality.md'], replace=True)
+                         [self.root/'health.json', self.root/'quality.json', self.root/'quality.md'],
+                         replace=True, timeout=60, deadline=publication_deadline)
 
 
 def main():

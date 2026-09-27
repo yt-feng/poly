@@ -1,21 +1,24 @@
 name: capture-v2-ci
 on:
   pull_request:
-    paths: ['*v2.py', '*v3.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
+    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
   push:
-    branches: ['improve/**']
-    paths: ['*v2.py', '*v3.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
+    branches: [main, 'improve/**']
+    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
 permissions:
   contents: read
 jobs:
   unit:
+    strategy:
+      matrix:
+        python: ['3.11', '3.14']
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
       - run: pip install -r requirements-v2.txt
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - run: python -m py_compile archive_v2.py capture_v2.py quality_v2.py daily_quality_v2.py binance_backfill_v2.py capture_v3.py microstructure_v3.py microstructure_math_v3.py

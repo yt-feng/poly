@@ -13,6 +13,7 @@ import aiohttp
 from capture_v2 import CLOB, GAMMA, ASSETS, BINANCE_WS, CHAINLINK_WS, epoch_ms, window_slug
 from microstructure_math_v3 import (number, decimal, book_features, fee_config, pair_quotes,
                                    market_reference, twap_price, TradeFlow, RollingPrices, ofi, event_reference)
+from official_reference_v3 import parse_event_page, page_reference
 
 FUTURES_REST = 'https://fapi.binance.com'
 FUTURES_MARKET = 'wss://fstream.binance.com/market/stream?streams='
@@ -44,6 +45,7 @@ class Microstructure:
         self.connections, self.market_due, self.clob_due = {}, {}, {}
         self.related = None
         self.event_details = {}
+        self.page_details = {}
         self.labels_seen, self.markouts = {}, deque()
         self.clock, self.last_data_trade = {}, {}
         self.last_liquidation = None
@@ -91,13 +93,15 @@ class Microstructure:
         slug = market.get('slug')
         if not slug or not slug.startswith('btc-updown-'):
             return
-        self.rules[slug] = event_reference(market, market_reference(market, ms), self.event_details.get(slug))
+        reference = event_reference(market, market_reference(market, ms), self.event_details.get(slug))
+        self.rules[slug] = page_reference(market, reference, self.page_details.get(slug))
         # Keep at most two hours of as-of rule observations in memory.
         cutoff = int(time.time())-7200
         for k in list(self.rules):
             if k.rsplit('-',1)[-1].isdigit() and int(k.rsplit('-',1)[-1]) < cutoff:
                 self.rules.pop(k, None)
                 self.event_details.pop(k, None)
+                self.page_details.pop(k, None)
         live_tokens = {str(t) for tokens in self.c.markets.values() for t in tokens.values()}
         self.poly_books = {k:v for k,v in self.poly_books.items() if k in live_tokens}
         self.previous_books = {k:v for k,v in self.previous_books.items() if k in live_tokens}
@@ -206,6 +210,21 @@ class Microstructure:
                     self.event_details[slug] = obs(event,ems)
                 except OPTIONAL_ERRORS as exc:
                     self.c.error('micro_event_details',exc)
+                start = int(slug.rsplit('-', 1)[1])
+                if start <= time.time() < start+300 and slug not in self.page_details:
+                    try:
+                        url = 'https://polymarket.com/event/'+slug
+                        text = await self.c.get(url)
+                        pms = int(time.time()*1000)
+                        self.c.raw('micro_event_page', {'slug': slug, 'url': url, 'html': text})
+                        detail = parse_event_page(text, m, market_reference(m, pms), pms)
+                        if detail:
+                            self.page_details[slug] = detail
+                            self.c.raw('micro_official_opening_reference', detail)
+                        else:
+                            self.c.error('micro_event_page', ValueError('No matching live opening reference in official page'))
+                    except OPTIONAL_ERRORS as exc:
+                        self.c.error('micro_event_page', exc)
                 ms = int(time.time()*1000)
                 self.set_market(m,ms)
                 current = int(slug.rsplit('-',1)[1])+300 > now

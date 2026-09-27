@@ -211,7 +211,8 @@ async def market_socket(collector, url, handler):
                         await maintenance
                         raise RuntimeError('market subscription maintenance exited')
                     try:
-                        msg = await asyncio.wait_for(ws.receive(), timeout=1)
+                        async with asyncio.timeout(1):
+                            msg = await ws.receive()
                     except asyncio.TimeoutError:
                         continue
                     if msg.type == aiohttp.WSMsgType.TEXT:

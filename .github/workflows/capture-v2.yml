@@ -2,10 +2,8 @@ name: capture-v2
 on:
   push:
     branches: [main]
-    paths: ['capture_v2.py', '*v3.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
+    paths: ['capture_v2.py', '*v3.py', 'market_ws_guard.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
   workflow_dispatch:
-  schedule:
-    - cron: '23 * * * *'
 permissions:
   contents: write
 concurrency:
@@ -30,7 +28,7 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Four-hour capture with durable rolling release checkpoints
         run: |
-          python -u capture_v3.py \
+          timeout --signal=INT --kill-after=30s 255m python -u capture_v3.py \
             --assets "$CAPTURE_ASSETS" --seconds 14400 \
             --output capture_v2_output \
             --release "capture-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
@@ -46,7 +44,7 @@ jobs:
           retention-days: 7
       - name: Emergency copy when publication or capture fails
         uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() || cancelled()
         with:
           name: capture-v2-recovery-${{ github.run_id }}-${{ github.run_attempt }}
           path: capture_v2_output/

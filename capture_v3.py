@@ -17,6 +17,8 @@ from microstructure_v3 import Microstructure
 from microstructure_math_v3 import server_time_text
 from market_ws_guard import MarketWSGuard, market_socket, current_tokens
 
+OFFICIAL_PAGE_HEADER_LIMIT = 32*1024
+
 
 class FeatureArchive(Archive):
     def __init__(self, root, feature_engine, collector):
@@ -63,17 +65,25 @@ class CollectorV3(Collector):
         start = time.monotonic_ns()
         status,error = 200,None
         try:
-            if url == CLOB+'/time':
+            if url == CLOB+'/time' or url.startswith('https://polymarket.com/event/'):
                 host = urlparse(url).hostname
                 if time.monotonic() < self.cooldown.get(host,0):
                     raise RuntimeError(f'{host}: server-directed cooldown')
-                async with self.session.get(url,params=params,timeout=aiohttp.ClientTimeout(total=5)) as r:
+                # The official event page sends a CSP header larger than
+                # aiohttp's 8 KiB default. Keep a finite, page-only bound.
+                page_limits = ({'max_line_size': OFFICIAL_PAGE_HEADER_LIMIT,
+                                'max_field_size': OFFICIAL_PAGE_HEADER_LIMIT}
+                               if url.startswith('https://polymarket.com/event/') else {})
+                async with self.session.get(url,params=params,timeout=aiohttp.ClientTimeout(total=5), **page_limits) as r:
                     status = r.status
                     if status in (403,418,429,451):
                         retry = r.headers.get('Retry-After','300')
                         self.cooldown[host] = time.monotonic()+max(60,int(retry) if retry.isdigit() else 300)
                     r.raise_for_status()
-                    return server_time_text(await r.text())
+                    text = await r.text()
+                    if len(text) > 4*1024*1024:
+                        raise ValueError('Official response exceeds capture size bound')
+                    return server_time_text(text) if url == CLOB+'/time' else text
             return await super().get(url,params)
         except Exception as exc:
             status,error = getattr(exc,'status',None),str(exc)[:200]
