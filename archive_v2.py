@@ -31,32 +31,38 @@ def atomic_json(path: Path, obj) -> None:
     temp.replace(path)
 
 
-def gh(*args: str, timeout: float | None = None) -> str:
+def gh(*args: str, timeout: float | None = None, deadline: float | None = None) -> str:
+    if deadline is not None:
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Release publication deadline exhausted; retain recovery files')
+        timeout = min(timeout, remaining) if timeout is not None else remaining
     return subprocess.run(['gh', *args], check=True, text=True,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           timeout=timeout).stdout
 
 
-def ensure_release(tag: str, *, timeout: float | None = None) -> None:
+def ensure_release(tag: str, *, timeout: float | None = None,
+                   deadline: float | None = None) -> None:
     try:
-        gh('release', 'view', tag, timeout=timeout)
+        gh('release', 'view', tag, timeout=timeout, deadline=deadline)
     except subprocess.CalledProcessError:
         # Any authorization failure also fails creation; never mark an upload done.
         gh('release', 'create', tag, '--target', 'main', '--title', tag,
            '--notes', 'Append-only public market-data archive; see CAPTURE_V2.md.',
-           '--latest=false', timeout=timeout)
+           '--latest=false', timeout=timeout, deadline=deadline)
 
 
 def publish(tag: str, paths: list[Path], *, replace: bool = False,
-            timeout: float | None = None) -> None:
+            timeout: float | None = None, deadline: float | None = None) -> None:
     if not paths:
         return
-    ensure_release(tag, timeout=timeout)
+    ensure_release(tag, timeout=timeout, deadline=deadline)
     for path in paths:
         args = ['release', 'upload', tag, str(path)]
         if replace:
             args.append('--clobber')
-        gh(*args, timeout=timeout)
+        gh(*args, timeout=timeout, deadline=deadline)
 
 
 class Archive:
@@ -108,10 +114,12 @@ class Archive:
 
 
 def upload_ready(root: Path, tag: str, *, stop: threading.Event | None = None,
-                 budget_seconds: float | None = None) -> None:
+                 budget_seconds: float | None = None, deadline: float | None = None) -> None:
     """Runs off the sampling thread. Files remain local after durable upload."""
     uploaded_path = root / '.uploaded.json'
-    deadline = time.monotonic()+budget_seconds if budget_seconds is not None else None
+    if budget_seconds is not None:
+        budget_deadline = time.monotonic()+budget_seconds
+        deadline = min(deadline, budget_deadline) if deadline is not None else budget_deadline
     uploaded = set(json.loads(uploaded_path.read_text())) if uploaded_path.exists() else set()
     for path in sorted(root.glob('*.jsonl.gz')):
         if stop is not None and stop.is_set():
@@ -123,9 +131,9 @@ def upload_ready(root: Path, tag: str, *, stop: threading.Event | None = None,
             raise TimeoutError('Release upload budget exhausted; retain recovery files')
         # A retry may follow an ambiguous network result. Immutable local bytes
         # and a run-specific tag make replacing the same asset idempotent.
-        publish(tag, [path, checksum], replace=True, timeout=60)
+        publish(tag, [path, checksum], replace=True, timeout=60, deadline=deadline)
         uploaded.add(path.name)
         atomic_json(uploaded_path, sorted(uploaded))
     manifest = root / 'manifest.json'
     if manifest.exists():
-        publish(tag, [manifest], replace=True, timeout=60)
+        publish(tag, [manifest], replace=True, timeout=60, deadline=deadline)

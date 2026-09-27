@@ -9,7 +9,7 @@ import time
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from archive_v2 import Archive, gh, upload_ready
+from archive_v2 import Archive, gh, publish, upload_ready
 from capture_v2 import Collector
 from capture_watchdog_v2 import ensure_capture
 from quality_v2 import read_snapshots, summarize
@@ -94,8 +94,47 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((root/'quality.json').exists())
             self.assertFalse(list(root.glob('*.part')))
 
+    async def test_shutdown_failure_keeps_quality_and_drains_publisher(self):
+        class FailedShutdown(OfflineCollector):
+            async def stop_tasks(self, tasks, grace=10):
+                await super().stop_tasks(tasks, grace)
+                raise RuntimeError('synthetic shutdown deadline')
+
+        finished = threading.Event()
+        def uploader(root, release, *, stop=None):
+            stop.wait(1)
+            time.sleep(.02)
+            finished.set()
+
+        with tempfile.TemporaryDirectory() as d, patch('capture_v2.upload_ready', side_effect=uploader):
+            root = Path(d)
+            c = FailedShutdown(['btc'], root, 'synthetic')
+            with self.assertRaisesRegex(RuntimeError, 'synthetic shutdown deadline'):
+                await c.run(1)
+            self.assertTrue(finished.is_set())
+            self.assertTrue(c.upload_task.done())
+            self.assertTrue((root/'quality.json').exists())
+            self.assertEqual(len(list(read_snapshots(root))), 3)
+            self.assertFalse(list(root.glob('*.part')))
+
 
 class PublicationTests(unittest.TestCase):
+    def test_one_deadline_covers_release_view_and_each_upload(self):
+        with patch('archive_v2.time.monotonic', side_effect=[90, 95, 101]), patch('archive_v2.subprocess.run') as run:
+            with self.assertRaisesRegex(TimeoutError, 'deadline exhausted'):
+                publish('synthetic', [Path('segment'), Path('checksum')], timeout=60, deadline=100)
+            # The second upload never starts after the shared budget expires.
+            self.assertEqual([c.kwargs['timeout'] for c in run.call_args_list], [10, 5])
+
+    def test_expired_deadline_prevents_manifest_upload_without_pending_segments(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'manifest.json').write_text('{}')
+            with patch('archive_v2.time.monotonic', return_value=101), patch('archive_v2.subprocess.run') as run:
+                with self.assertRaises(TimeoutError):
+                    upload_ready(root, 'synthetic', deadline=100)
+                run.assert_not_called()
+
     def test_cli_timeout_is_enforced(self):
         with patch('archive_v2.subprocess.run', side_effect=subprocess.TimeoutExpired('gh', 60)) as run:
             with self.assertRaises(subprocess.TimeoutExpired):

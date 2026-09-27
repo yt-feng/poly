@@ -414,6 +414,7 @@ class Collector:
                 if sampler not in done:
                     raise RuntimeError('A collector task exited unexpectedly')
             finally:
+                publication_deadline = time.monotonic()+600
                 self.upload_stop.set()
                 try:
                     await self.stop_tasks([sampler, *jobs])
@@ -421,7 +422,6 @@ class Collector:
                     self.archive.close()
                     atomic_json(self.root/'health.json', self.health())
                     report(self.root, self.root/'quality.json', assets=self.assets)
-                if self.release:
                     if self.upload_task is not None:
                         # No overlapping writers to the upload checkpoint or
                         # manifest, even if cancellation hit a running gh call.
@@ -429,9 +429,11 @@ class Collector:
                             await self.upload_task
                         except Exception as exc:
                             print('Checkpoint upload failed; retrying final publication: '+str(exc), flush=True)
-                    await asyncio.to_thread(upload_ready, self.root, self.release, budget_seconds=600)
+                if self.release:
+                    await asyncio.to_thread(upload_ready, self.root, self.release, deadline=publication_deadline)
                     await asyncio.to_thread(publish, self.release,
-                         [self.root/'health.json', self.root/'quality.json', self.root/'quality.md'], replace=True, timeout=60)
+                         [self.root/'health.json', self.root/'quality.json', self.root/'quality.md'],
+                         replace=True, timeout=60, deadline=publication_deadline)
 
 
 def main():
