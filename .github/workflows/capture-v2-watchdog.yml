@@ -1,0 +1,31 @@
+name: capture-v2-watchdog
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [capture-v2]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '23 * * * *'
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: capture-v2-watchdog
+  cancel-in-progress: false
+jobs:
+  continue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start one successor only when no capture is active
+        run: python capture_watchdog_v2.py
