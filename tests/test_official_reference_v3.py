@@ -19,12 +19,15 @@ class OfficialReferenceTests(unittest.TestCase):
                       'state': {'status': 'success', 'error': None, 'dataUpdatedAt': self.start+10000,
                                 'data': {'openPrice': 84447.94584493896, 'closePrice': None}}}
 
-    def html(self, *queries, slug=None):
+    def html(self, *queries, slug=None, condition='test-condition', reorder=False, split=False,
+             prefix=''):
         # Exact server-rendered query shape, with synthetic fixture identity.
         slug = slug or self.market['slug']
-        data = '1:'+json.dumps({'state': {'queries': list(queries or [self.query])}})
+        data = prefix+'1:'+json.dumps({'market': {'slug': slug, 'conditionId': condition},
+                                     'state': {'queries': list(queries or [self.query])}}, sort_keys=reorder)
+        chunks = [data[:len(data)//2], data[len(data)//2:]] if split else [data]
         return ('<link rel="canonical" href="https://polymarket.com/event/'+slug+'">'
-                '<script>self.__next_f.push('+json.dumps([1, data])+')</script>')
+                +''.join('<script>self.__next_f.push('+json.dumps([1, chunk])+')</script>' for chunk in chunks))
 
     def parse(self, html=None, received=None):
         return parse_event_page(html or self.html(), self.market, self.reference, received or self.start+20000)
@@ -35,6 +38,27 @@ class OfficialReferenceTests(unittest.TestCase):
         self.assertEqual(result['published_price_to_beat'], '84447.94584493896')
         self.assertEqual(result['price_to_beat_received_ms'], self.start+20000)
         self.assertEqual(detail['query']['queryKey'], self.query['queryKey'])
+
+    def test_field_order_and_script_chunk_boundaries_do_not_change_value(self):
+        expected = self.parse()['published_price_to_beat']
+        for reorder, split in ((True, False), (False, True), (True, True)):
+            self.assertEqual(self.parse(self.html(reorder=reorder, split=split))['published_price_to_beat'], expected)
+
+    def test_page_condition_must_independently_match_gamma(self):
+        for condition in (None, 'other-condition'):
+            with self.assertRaisesRegex(ValueError, 'condition identity'):
+                self.parse(self.html(condition=condition))
+
+    def test_text_frames_cannot_inject_queries_and_unicode_lengths_are_bytes(self):
+        fake = copy.deepcopy(self.query)
+        fake['state']['data']['openPrice'] = 90000
+        text = '非结构化文本\n3:'+json.dumps({'state': {'queries': [fake]}})
+        frame = '0:T'+format(len(text.encode()), 'x')+','+text
+        self.assertEqual(self.parse(self.html(prefix=frame, split=True))['published_price_to_beat'], '84447.94584493896')
+
+    def test_truncated_stream_fails_closed(self):
+        with self.assertRaises(ValueError):
+            self.parse(self.html(prefix='0:Tffffff,incomplete'))
 
     def test_other_symbol_window_and_twap_never_match(self):
         for index, wrong in [(2, 'ETH'), (3, '2026-09-27T17:00:00Z'), (4, 'fifteenminute'),

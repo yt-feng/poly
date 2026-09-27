@@ -38,6 +38,45 @@ class EventPage(HTMLParser):
                 self.chunks.append(payload[1])
 
 
+def page_objects(chunks):
+    """Decode framed RSC JSON, independent of keys and script chunk boundaries.
+
+    Text/binary frames have byte lengths and may contain fake JSON or newlines;
+    skip those exactly rather than searching strings for a price-shaped object.
+    """
+    data = ''.join(chunks).encode('utf-8')
+    position = 0
+    while position < len(data):
+        if data[position:position+1] == b'\n':
+            position += 1
+            continue
+        header = re.match(rb'[0-9a-f]*:', data[position:])
+        if not header:
+            raise ValueError('Unrecognized official page stream framing')
+        position += header.end()
+        sized = re.match(rb'[A-Za-z]([0-9a-f]+),', data[position:])
+        if sized:
+            position += sized.end()+int(sized[1], 16)
+            if position > len(data):
+                raise ValueError('Truncated official page stream frame')
+            continue
+        end = data.find(b'\n', position)
+        if end < 0:
+            end = len(data)
+        record = data[position:end]
+        position = end+1
+        if record[:1] not in (b'[', b'{'):
+            continue  # Module/preload/control frames are not hydration state.
+        stack = [json.loads(record)]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, list):
+                stack.extend(value)
+            elif isinstance(value, dict):
+                yield value
+                stack.extend(value.values())
+
+
 def parse_event_page(text, market, reference, received_ms):
     slug = market.get('slug', '')
     match = re.fullmatch(r'btc-updown-5m-(\d+)', slug)
@@ -54,13 +93,13 @@ def parse_event_page(text, market, reference, received_ms):
     page.feed(text)
     if page.canonical != {url}:
         raise ValueError('Official event page identity mismatch')
-    payload = ''.join(page.chunks)
+    objects = list(page_objects(page.chunks))
+    conditions = {obj['conditionId'] for obj in objects
+                  if obj.get('slug') == slug and isinstance(obj.get('conditionId'), str)}
+    if conditions != {market['conditionId']}:
+        raise ValueError('Official event page condition identity mismatch')
     candidates = []
-    for match in re.finditer(r'\{"dehydratedAt"', payload):
-        try:
-            query, _ = json.JSONDecoder().raw_decode(payload[match.start():])
-        except ValueError:
-            continue
+    for query in objects:
         query_key = query.get('queryKey')
         if query_key != key or query_key[6] is not True:
             continue
@@ -80,7 +119,7 @@ def parse_event_page(text, market, reference, received_ms):
     if len({value for value, _ in candidates}) != 1:
         raise ValueError('Conflicting official event opening references')
     value, query = candidates[0]
-    return {'slug': slug, 'condition_id': market['conditionId'], 'source_url': url,
+    return {'slug': slug, 'condition_id': next(iter(conditions)), 'source_url': url,
             'twap_lookback_seconds': lookback, 'published_price_to_beat': str(value),
             'received_ms': received_ms, 'query': query}
 
