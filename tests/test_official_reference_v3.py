@@ -1,6 +1,9 @@
 import copy
 import json
 import unittest
+from aiohttp.http_exceptions import LineTooLong
+from aiohttp.http_parser import HttpResponseParserPy
+from capture_v3 import OFFICIAL_PAGE_HEADER_LIMIT
 
 from microstructure_math_v3 import market_reference
 from official_reference_v3 import parse_event_page, page_reference
@@ -119,3 +122,19 @@ class OfficialReferenceTests(unittest.TestCase):
     def test_matching_gamma_value_keeps_gamma_provenance(self):
         original = {**self.reference, 'published_price_to_beat': '84447.94584493896', 'price_to_beat_path': 'gamma'}
         self.assertEqual(page_reference(self.market, original, self.parse()), original)
+
+
+class OfficialHeaderTests(unittest.TestCase):
+    def test_official_csp_exceeding_default_limit_parses_with_bounded_limit(self):
+        response = b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Security-Policy: '+b'a'*10000+b'\r\n\r\n'
+        with self.assertRaises(LineTooLong):
+            HttpResponseParserPy().feed_data(response)
+        messages, _, _ = HttpResponseParserPy(max_line_size=OFFICIAL_PAGE_HEADER_LIMIT,
+                                             max_field_size=OFFICIAL_PAGE_HEADER_LIMIT).feed_data(response)
+        self.assertEqual(messages[0][0].code, 200)
+
+    def test_oversized_header_still_rejected(self):
+        response = b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nContent-Security-Policy: '+b'a'*(OFFICIAL_PAGE_HEADER_LIMIT+1)+b'\r\n\r\n'
+        with self.assertRaises(LineTooLong):
+            HttpResponseParserPy(max_line_size=OFFICIAL_PAGE_HEADER_LIMIT,
+                                 max_field_size=OFFICIAL_PAGE_HEADER_LIMIT).feed_data(response)
