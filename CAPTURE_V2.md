@@ -79,11 +79,12 @@ is a bootstrap destination, **not** an unlimited all-symbol data lake. Before
 large-scale expansion, add object storage and resource budgets. Neither existing
 CSV history nor existing releases are deleted by these workflows.
 
-Shutdown retries cancelled feed tasks with bounded waits and records stalled task
+Shutdown preserves `pre_shutdown_live_health` before clearing connections,
+retries cancelled feed tasks with bounded waits and records stalled task
 names/stacks in `shutdown.json`. Checkpoint upload threads are drained before
 final publication so two uploaders cannot overwrite each other's progress. Each
-capture upload command has a 60-second timeout; final backlog publication has a
-10-minute budget, and the workflow has a 255-minute process deadline with a
+capture upload command has a 60-second timeout; all final publication calls share
+one 10-minute deadline, and the workflow has a 255-minute process deadline with a
 30-second interrupt grace period. Failed or cancelled jobs retain a recovery
 artifact. Missing historical Polymarket observations remain gaps.
 

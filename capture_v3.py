@@ -63,7 +63,7 @@ class CollectorV3(Collector):
         start = time.monotonic_ns()
         status,error = 200,None
         try:
-            if url == CLOB+'/time':
+            if url == CLOB+'/time' or url.startswith('https://polymarket.com/event/'):
                 host = urlparse(url).hostname
                 if time.monotonic() < self.cooldown.get(host,0):
                     raise RuntimeError(f'{host}: server-directed cooldown')
@@ -73,7 +73,10 @@ class CollectorV3(Collector):
                         retry = r.headers.get('Retry-After','300')
                         self.cooldown[host] = time.monotonic()+max(60,int(retry) if retry.isdigit() else 300)
                     r.raise_for_status()
-                    return server_time_text(await r.text())
+                    text = await r.text()
+                    if len(text) > 4*1024*1024:
+                        raise ValueError('Official response exceeds capture size bound')
+                    return server_time_text(text) if url == CLOB+'/time' else text
             return await super().get(url,params)
         except Exception as exc:
             status,error = getattr(exc,'status',None),str(exc)[:200]

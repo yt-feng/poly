@@ -108,6 +108,7 @@ class Collector:
         self.session = None
         self.upload_task = None
         self.upload_stop = threading.Event()
+        self.pre_shutdown_live_health = None
 
     def raw(self, source: str, payload, *, connection_id=None, event_ms=None):
         self.counts[source] += 1
@@ -341,11 +342,14 @@ class Collector:
             await asyncio.sleep(max(0, deadline-time.monotonic()))
 
     def health(self):
-        return dict(schema_version=2, updated_ms=int(time.time()*1000), started_ms=self.started_ms,
+        health = dict(schema_version=2, updated_ms=int(time.time()*1000), started_ms=self.started_ms,
                     latest_sample_ms=self.latest_sample_ms, assets=self.assets,
                     connected=self.connected.copy(), raw_counts=dict(self.counts),
                     valid_snapshot_counts=dict(self.valid), last_valid_ms=self.last_valid_ms.copy(),
                     last_errors=self.last_error.copy())
+        if self.pre_shutdown_live_health is not None:
+            health['pre_shutdown_live_health'] = self.pre_shutdown_live_health
+        return health
 
     async def checkpoint(self):
         while True:
@@ -414,6 +418,7 @@ class Collector:
                 if sampler not in done:
                     raise RuntimeError('A collector task exited unexpectedly')
             finally:
+                self.pre_shutdown_live_health = self.health()
                 publication_deadline = time.monotonic()+600
                 self.upload_stop.set()
                 try:

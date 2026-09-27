@@ -38,6 +38,9 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(list(read_snapshots(root))), 3)
                 self.assertFalse(list(root.glob('*.part')))
                 self.assertEqual(json.loads((root/'quality.json').read_text())['daily'][0]['rows'], 3)
+                health = json.loads((root/'health.json').read_text())
+                self.assertIn('pre_shutdown_live_health', health)
+                self.assertNotIn('pre_shutdown_live_health', health['pre_shutdown_live_health'])
 
     async def test_stalled_cancellation_is_retried_and_diagnosed(self):
         async def delayed_exit():
