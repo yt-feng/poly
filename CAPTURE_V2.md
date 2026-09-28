@@ -158,3 +158,41 @@ be treated as proof of complete data. Monitor freshness and report coverage.
 * https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md
 * https://github.com/binance/binance-public-data
 * https://docs.polymarket.com/market-data/realtime-data
+
+
+### Continuous successor handoff
+
+The September 27 repair produced two verified four-hour archives, but capture
+stopped after the second at 02:10 UTC on September 28. The completion-triggered
+watchdog was absent and no hourly watchdog ran between 00:52 and the manual
+06:48 recovery. A first successful successor was therefore insufficient proof
+of indefinite continuity. GitHub documents a three-level `workflow_run` chain
+limit and delayed/dropped scheduled events; the API history does not expose the
+platform's exact reason for omitting this particular event.
+
+The capture workflow now has a final, bounded `handoff` job which directly
+uses `workflow_dispatch`. It treats a workflow as draining only after verifying its repository,
+branch, workflow and completed capture job. This includes its own run and lets
+a newer watchdog finish a handoff whose pending job GitHub has replaced. The handoff and independent watchdog share `capture-v2-continuation`
+concurrency, while `capture-v2-production` still prevents overlapping collectors.
+Requested, waiting, pending, queued and running successors all prevent another
+dispatch. The current run still counts towards the unchanged three starts in
+15 minutes restart limit. A dispatch returns an actual run ID, and its identity
+and active state are verified; ambiguous POST failures are never retried blindly.
+The watchdog remains an independent recovery path for cancellation or failure
+which prevents the final handoff from executing. Neither scheduling path makes
+GitHub runner availability a wall-clock guarantee.
+
+`capture-continuity-probe.yml` verifies six real direct-dispatch handoffs on an
+isolated branch without running collectors, accessing market data, or publishing
+archives. Its fixed six-hop/session cap uses an isolated eight-start fixture
+budget because the synthetic jobs finish in seconds rather than four hours;
+the production three-start budget is unchanged and separately regression-tested.
+The probe checks the same identity, worker-completion, active-run and dispatch
+acknowledgement logic as production. History gaps remain gaps and the daily 95%
+coverage gate is unchanged.
+
+Platform references:
+- https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run
+- https://docs.github.com/en/actions/how-tos/troubleshoot-workflows#scheduled-workflows-running-at-unexpected-times
+- https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event

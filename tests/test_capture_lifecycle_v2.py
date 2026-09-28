@@ -185,16 +185,20 @@ class WatchdogTests(unittest.TestCase):
 
     def test_all_active_states_prevent_duplicate(self):
         for status in ('queued', 'pending', 'waiting', 'requested', 'in_progress'):
-            call = Mock(return_value=json.dumps({'workflow_runs': [self.run_record(status)]}))
+            responses = [json.dumps({'workflow_runs': [self.run_record(status)]})]
+            if status == 'in_progress':
+                responses.extend([json.dumps({'id': 1, 'path': '.github/workflows/capture-v2.yml', 'head_branch': 'main', 'repository': {'full_name': 'owner/repo'}}), json.dumps({'jobs': [{'name': 'capture', 'status': 'in_progress'}]})])
+            call = Mock(side_effect=responses)
             self.assertEqual(ensure_capture('owner/repo', now=self.now, call=call)['action'], 'already_active')
-            self.assertEqual(call.call_count, 1)
+            self.assertEqual(call.call_count, 3 if status == 'in_progress' else 1)
 
     def test_completed_run_is_replaced_then_repeated_event_sees_active(self):
-        call = Mock(side_effect=[json.dumps({'workflow_runs': [self.run_record('completed')]}), '',
+        call = Mock(side_effect=[json.dumps({'workflow_runs': [self.run_record('completed')]}),
+                               json.dumps({'workflow_run_id': 2}), json.dumps({'id': 2, 'path': '.github/workflows/capture-v2.yml', 'head_branch': 'main', 'repository': {'full_name': 'owner/repo'}, 'status': 'queued', 'event': 'workflow_dispatch', 'html_url': 'https://example.test/2'}),
                                json.dumps({'workflow_runs': [self.run_record('queued', 0, 2)]})])
         self.assertEqual(ensure_capture('owner/repo', now=self.now, call=call)['action'], 'dispatched')
         self.assertEqual(ensure_capture('owner/repo', now=self.now, call=call)['action'], 'already_active')
-        self.assertEqual(sum(c.args[:2] == ('workflow', 'run') for c in call.call_args_list), 1)
+        self.assertEqual(sum('--method' in c.args and 'POST' in c.args for c in call.call_args_list), 1)
 
     def test_repeated_fast_failures_do_not_loop(self):
         call = Mock(return_value=json.dumps({'workflow_runs': [self.run_record('completed', i, i) for i in range(3)]}))
@@ -210,7 +214,7 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(call.call_count, 1)
 
     def test_next_day_can_recover_after_restart_loop(self):
-        call = Mock(side_effect=[json.dumps({'workflow_runs': [self.run_record('completed', i, i) for i in range(3)]}), ''])
+        call = Mock(side_effect=[json.dumps({'workflow_runs': [self.run_record('completed', i, i) for i in range(3)]}), json.dumps({'workflow_run_id': 4}), json.dumps({'id': 4, 'path': '.github/workflows/capture-v2.yml', 'head_branch': 'main', 'repository': {'full_name': 'owner/repo'}, 'status': 'queued', 'event': 'workflow_dispatch', 'html_url': 'https://example.test/4'})])
         self.assertEqual(ensure_capture('owner/repo', now=self.now+timedelta(days=1), call=call)['action'], 'dispatched')
 
 

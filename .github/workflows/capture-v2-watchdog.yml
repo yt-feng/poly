@@ -11,7 +11,7 @@ permissions:
   contents: read
   actions: write
 concurrency:
-  group: capture-v2-watchdog
+  group: capture-v2-continuation
   cancel-in-progress: false
 jobs:
   continue:

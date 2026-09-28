@@ -2,7 +2,7 @@ name: capture-v2
 on:
   push:
     branches: [main]
-    paths: ['capture_v2.py', 'capture_runtime_v2.py', '*v3.py', 'market_ws_guard.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
+    paths: ['capture_v2.py', 'capture_runtime_v2.py', '*v3.py', 'market_ws_guard.py', 'archive_v2.py', 'capture_watchdog_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
   workflow_dispatch:
 permissions:
   contents: write
@@ -50,3 +50,28 @@ jobs:
           path: capture_v2_output/
           retention-days: 7
           compression-level: 0
+
+  handoff:
+    needs: capture
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    # The watchdog and this final job serialize the same inspect/dispatch decision.
+    concurrency:
+      group: capture-v2-continuation
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Acknowledge exactly one successor after capture has ended
+        run: python capture_watchdog_v2.py --current-run-id "$GITHUB_RUN_ID"
