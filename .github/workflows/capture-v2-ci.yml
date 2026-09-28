@@ -21,7 +21,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -r requirements-v2.txt
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - run: python -m py_compile archive_v2.py capture_v2.py quality_v2.py daily_quality_v2.py binance_backfill_v2.py capture_v3.py microstructure_v3.py microstructure_math_v3.py
+      - run: python -m py_compile archive_v2.py capture_runtime_v2.py capture_v2.py quality_v2.py daily_quality_v2.py binance_backfill_v2.py capture_v3.py microstructure_v3.py microstructure_math_v3.py
   live-smoke:
     needs: unit
     runs-on: ubuntu-latest

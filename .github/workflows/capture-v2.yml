@@ -2,7 +2,7 @@ name: capture-v2
 on:
   push:
     branches: [main]
-    paths: ['capture_v2.py', '*v3.py', 'market_ws_guard.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
+    paths: ['capture_v2.py', 'capture_runtime_v2.py', '*v3.py', 'market_ws_guard.py', 'archive_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
   workflow_dispatch:
 permissions:
   contents: write

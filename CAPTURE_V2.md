@@ -88,6 +88,15 @@ one 10-minute deadline, and the workflow has a 255-minute process deadline with 
 30-second interrupt grace period. Failed or cancelled jobs retain a recovery
 artifact. Missing historical Polymarket observations remain gaps.
 
+Both v2 and v3 CLIs also bound interpreter cleanup to 30 seconds after the
+collector finishes. Remaining tasks and asynchronous generators are diagnosed
+in `process_cleanup.json`; their cancellation cannot trigger an unlimited
+`asyncio.run` cleanup gather. The owned default executor is joined within the
+same deadline. Any unfinished cleanup fails the CLI. If a worker never returns,
+the CLI writes diagnostics, reports the failure to stderr, and exits with status
+1 without entering CPython's unlimited executor join at interpreter exit.
+Completed tail segments, health and quality remain available for recovery.
+
 ## Historical backfill
 
 Every hour the bounded job resumes original `trades`, `aggTrades`, `1s` and `1m`
