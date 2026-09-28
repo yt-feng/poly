@@ -82,8 +82,8 @@ def ensure_workflow(repo, *, workflow, branch, worker_job, current_run_id=None,
     _identity(successor, repo, workflow, branch)
     if successor.get('id') != successor_id:
         raise RuntimeError('Successor response has a mismatched ID')
-    if title_prefix is not None and not successor.get('display_title', '').startswith(title_prefix):
-        raise RuntimeError('Acknowledged successor belongs to a different probe session')
+    # GitHub renders run-name only after a pending run starts. The acknowledged
+    # ID plus repository/workflow/ref are stable while its display title is not.
     if successor.get('status') not in ACTIVE or successor.get('event') != 'workflow_dispatch':
         raise RuntimeError('Acknowledged successor is not active; inspect it before retrying')
     return {'action': 'dispatched', 'predecessor_run_id': current_run_id, 'draining_runs': draining,

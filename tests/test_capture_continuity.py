@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock
 
-from capture_watchdog_v2 import ensure_capture, PRODUCTION_RESTART_LIMIT
+from capture_watchdog_v2 import ensure_capture, ensure_workflow, PRODUCTION_RESTART_LIMIT
 from capture_continuity_probe import continue_probe
 
 
@@ -143,6 +143,15 @@ class ContinuityTests(unittest.TestCase):
             api = Actions(); api.ack_change = mutation
             with self.assertRaises(RuntimeError): api.handoff()
             self.assertEqual(api.posts, 1)
+
+    def test_pending_successor_display_title_is_not_its_dispatch_identity(self):
+        api = Actions(); api.runs[1]['display_title'] = 'fixture-session step 1'
+        api.ack_change = {'display_title': 'capture-continuity-probe'}
+        result = ensure_workflow('owner/repo', workflow='capture-v2.yml', branch='main',
+                                 worker_job='capture', current_run_id=1, now=api.now,
+                                 call=api, title_prefix='fixture-session ')
+        self.assertEqual(result['successor_run_id'], 2)
+        self.assertEqual(api.posts, 1)
 
     def test_ambiguous_dispatch_is_not_retried(self):
         api = Actions(); posts=[]
