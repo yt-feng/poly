@@ -17,6 +17,7 @@ import uuid
 from urllib.parse import urlparse
 import aiohttp
 from archive_v2 import Archive, atomic_json, publish, upload_ready
+from capture_runtime_v2 import run_capture
 from quality_v2 import report
 
 ASSETS = {'btc': 'BTCUSDT', 'eth': 'ETHUSDT', 'sol': 'SOLUSDT'}
@@ -455,7 +456,7 @@ def main():
     if a.output.exists() and any(a.output.iterdir()):
         p.error('Output must be empty: one directory per run prevents segment overwrite')
     c = Collector(assets, a.output, a.release)
-    asyncio.run(c.run(a.seconds))
+    run_capture(c, a.seconds)
     print(json.dumps(c.health(), indent=2))
     if a.require_core and (c.valid['poly'] < 5 or c.valid['binance'] < 5):
         raise SystemExit('Core feed smoke check failed; archived diagnostics show the missing feed.')

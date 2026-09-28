@@ -1,10 +1,10 @@
 name: market-ws-check
 on:
   pull_request:
-    paths: ['capture_v3.py', 'market_ws_guard.py', 'validate_market_ws.py', 'tests/test_market_ws_guard.py', '.github/workflows/market-ws-check.yml']
+    paths: ['capture_v3.py', 'capture_runtime_v2.py', 'market_ws_guard.py', 'validate_market_ws.py', 'tests/test_market_ws_guard.py', 'tests/test_capture_runtime_v2.py', 'tests/capture_process_fixture.py', '.github/workflows/market-ws-check.yml']
   push:
     branches: [main]
-    paths: ['capture_v3.py', 'market_ws_guard.py', 'validate_market_ws.py', 'tests/test_market_ws_guard.py', '.github/workflows/market-ws-check.yml']
+    paths: ['capture_v3.py', 'capture_runtime_v2.py', 'market_ws_guard.py', 'validate_market_ws.py', 'tests/test_market_ws_guard.py', 'tests/test_capture_runtime_v2.py', 'tests/capture_process_fixture.py', '.github/workflows/market-ws-check.yml']
   workflow_dispatch:
 permissions:
   contents: read

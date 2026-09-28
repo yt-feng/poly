@@ -13,6 +13,7 @@ import time
 from urllib.parse import urlparse
 from archive_v2 import Archive
 from capture_v2 import Collector, ASSETS, CLOB
+from capture_runtime_v2 import run_capture
 from microstructure_v3 import Microstructure
 from microstructure_math_v3 import server_time_text
 from market_ws_guard import MarketWSGuard, market_socket, current_tokens
@@ -125,7 +126,7 @@ def main():
     if a.output.exists() and any(a.output.iterdir()):
         p.error('A new empty output directory is required')
     c = CollectorV3(assets,a.output,a.release)
-    asyncio.run(c.run(a.seconds))
+    run_capture(c, a.seconds)
     h = c.health()
     print(json.dumps(h,indent=2))
     if a.require_core and (c.valid['poly'] < 5 or c.valid['binance'] < 5):
