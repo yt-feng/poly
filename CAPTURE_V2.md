@@ -171,9 +171,9 @@ limit and delayed/dropped scheduled events; the API history does not expose the
 platform's exact reason for omitting this particular event.
 
 The capture workflow now has a final, bounded `handoff` job which directly
-uses `workflow_dispatch`. It only excludes its own workflow from the active-run
-inventory after verifying the repository/branch/workflow and completed capture
-job. The handoff and independent watchdog share `capture-v2-continuation`
+uses `workflow_dispatch`. It treats a workflow as draining only after verifying its repository,
+branch, workflow and completed capture job. This includes its own run and lets
+a newer watchdog finish a handoff whose pending job GitHub has replaced. The handoff and independent watchdog share `capture-v2-continuation`
 concurrency, while `capture-v2-production` still prevents overlapping collectors.
 Requested, waiting, pending, queued and running successors all prevent another
 dispatch. The current run still counts towards the unchanged three starts in

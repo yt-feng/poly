@@ -54,8 +54,10 @@ class ContinuityTests(unittest.TestCase):
     def test_six_production_handoffs_and_duplicate_events(self):
         api = Actions()
         for run_id in range(1, 7):
-            # The watchdog cannot replace a run whose handoff job is still running.
+            # While the worker runs, neither handoff caller can replace it.
+            api.workers[run_id][0]['status'] = 'in_progress'
             self.assertEqual(api.watchdog()['action'], 'already_active')
+            api.workers[run_id][0]['status'] = 'completed'
             result = api.handoff(run_id)
             self.assertEqual(result['successor_run_id'], run_id+1)
             self.assertEqual(api.handoff(run_id)['action'], 'already_active')
@@ -100,9 +102,21 @@ class ContinuityTests(unittest.TestCase):
     def test_pending_successor_prevents_self_and_watchdog_duplicates(self):
         for status in ('requested','waiting','pending','queued','in_progress'):
             api = Actions(); api.add(2, status=status)
+            api.workers[2][0]['status'] = 'in_progress'
             self.assertEqual(api.handoff()['runs'], [2])
             self.assertEqual(api.watchdog()['action'], 'already_active')
             self.assertEqual(api.posts, 0)
+
+    def test_new_watchdog_can_replace_pending_handoff_without_losing_succession(self):
+        api = Actions()
+        # Workflow still in_progress, but its capture job ended; a duplicate
+        # watchdog replaced the pending handoff in GitHub's single pending slot.
+        result = api.watchdog()
+        self.assertEqual(result['draining_runs'], [1])
+        self.assertEqual(result['successor_run_id'], 2)
+        self.assertEqual(api.handoff()['action'], 'already_active')
+        self.assertEqual(api.watchdog()['action'], 'already_active')
+        self.assertEqual(api.posts, 1)
 
     def test_watchdog_recovers_cancelled_run_when_self_handoff_cannot_run(self):
         api = Actions(); api.runs[1].update(status='completed', conclusion='cancelled')
