@@ -1,10 +1,10 @@
 name: capture-v2-ci
 on:
   pull_request:
-    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
+    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', 'capture_continuity_probe.py', '.github/workflows/capture-continuity-probe.yml', '.github/workflows/*v2*.yml']
   push:
     branches: [main, 'improve/**']
-    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', '.github/workflows/*v2*.yml']
+    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', 'capture_continuity_probe.py', '.github/workflows/capture-continuity-probe.yml', '.github/workflows/*v2*.yml']
 permissions:
   contents: read
 jobs:
