@@ -69,6 +69,8 @@ jobs:
             smoke_v2/quality.json
             smoke_v2/manifest.json
             smoke_v2/official-price-evidence.json
+            smoke_v2/snapshots-*.jsonl.gz
+            smoke_v2/snapshots-*.jsonl.gz.sha256
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
