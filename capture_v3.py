@@ -16,6 +16,7 @@ from capture_v2 import Collector, ASSETS, CLOB
 from capture_runtime_v2 import run_capture
 from microstructure_v3 import Microstructure
 from microstructure_math_v3 import server_time_text
+from official_reference_v3 import OFFICIAL_PRICE_URL
 from market_ws_guard import MarketWSGuard, market_socket, current_tokens
 
 OFFICIAL_PAGE_HEADER_LIMIT = 32*1024
@@ -66,15 +67,15 @@ class CollectorV3(Collector):
         start = time.monotonic_ns()
         status,error = 200,None
         try:
-            if url == CLOB+'/time' or url.startswith('https://polymarket.com/event/'):
+            if url == CLOB+'/time' or url.startswith('https://polymarket.com/event/') or url == OFFICIAL_PRICE_URL:
                 host = urlparse(url).hostname
                 if time.monotonic() < self.cooldown.get(host,0):
                     raise RuntimeError(f'{host}: server-directed cooldown')
-                # The official event page sends a CSP header larger than
-                # aiohttp's 8 KiB default. Keep a finite, page-only bound.
+                # Official HTML and the client price API both send a CSP header
+                # larger than aiohttp's default. Keep the finite origin bound.
                 page_limits = ({'max_line_size': OFFICIAL_PAGE_HEADER_LIMIT,
                                 'max_field_size': OFFICIAL_PAGE_HEADER_LIMIT}
-                               if url.startswith('https://polymarket.com/event/') else {})
+                               if url.startswith('https://polymarket.com/event/') or url == OFFICIAL_PRICE_URL else {})
                 async with self.session.get(url,params=params,timeout=aiohttp.ClientTimeout(total=5), **page_limits) as r:
                     status = r.status
                     if status in (403,418,429,451):
@@ -82,8 +83,14 @@ class CollectorV3(Collector):
                         self.cooldown[host] = time.monotonic()+max(60,int(retry) if retry.isdigit() else 300)
                     r.raise_for_status()
                     text = await r.text()
+                    if url == OFFICIAL_PRICE_URL:
+                        self.raw('micro_official_price_http', {
+                            'url': url, 'params': params, 'status': status,
+                            'headers': {key: r.headers[key] for key in ('Date', 'Age', 'Cache-Control', 'Content-Type') if key in r.headers}})
                     if len(text) > 4*1024*1024:
                         raise ValueError('Official response exceeds capture size bound')
+                    if url == OFFICIAL_PRICE_URL:
+                        return json.loads(text)
                     return server_time_text(text) if url == CLOB+'/time' else text
             return await super().get(url,params)
         except Exception as exc:

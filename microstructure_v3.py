@@ -13,7 +13,8 @@ import aiohttp
 from capture_v2 import CLOB, GAMMA, ASSETS, BINANCE_WS, CHAINLINK_WS, epoch_ms, window_slug
 from microstructure_math_v3 import (number, decimal, book_features, fee_config, pair_quotes,
                                    market_reference, twap_price, TradeFlow, RollingPrices, ofi, event_reference)
-from official_reference_v3 import parse_event_page, page_reference
+from official_reference_v3 import (parse_event_page, page_reference, opening_price_request,
+                                   parse_opening_price_response, client_price_reference)
 
 FUTURES_REST = 'https://fapi.binance.com'
 FUTURES_MARKET = 'wss://fstream.binance.com/market/stream?streams='
@@ -46,6 +47,7 @@ class Microstructure:
         self.related = None
         self.event_details = {}
         self.page_details = {}
+        self.client_price_details = {}
         self.labels_seen, self.markouts = {}, deque()
         self.clock, self.last_data_trade = {}, {}
         self.last_liquidation = None
@@ -94,7 +96,9 @@ class Microstructure:
         if not slug or not slug.startswith('btc-updown-'):
             return
         reference = event_reference(market, market_reference(market, ms), self.event_details.get(slug))
-        self.rules[slug] = page_reference(market, reference, self.page_details.get(slug))
+        reference = page_reference(market, reference, self.page_details.get(slug))
+        self.rules[slug] = client_price_reference(market, reference, self.client_price_details.get(slug),
+                                                 event_detail=self.event_details.get(slug))
         # Keep at most two hours of as-of rule observations in memory.
         cutoff = int(time.time())-7200
         for k in list(self.rules):
@@ -102,6 +106,7 @@ class Microstructure:
                 self.rules.pop(k, None)
                 self.event_details.pop(k, None)
                 self.page_details.pop(k, None)
+                self.client_price_details.pop(k, None)
         live_tokens = {str(t) for tokens in self.c.markets.values() for t in tokens.values()}
         self.poly_books = {k:v for k,v in self.poly_books.items() if k in live_tokens}
         self.previous_books = {k:v for k,v in self.previous_books.items() if k in live_tokens}
@@ -225,6 +230,33 @@ class Microstructure:
                             self.c.error('micro_event_page', ValueError('No matching live opening reference in official page'))
                     except OPTIONAL_ERRORS as exc:
                         self.c.error('micro_event_page', exc)
+                # The official UI also fetches JSON when SSR omits its price
+                # query. Keep the existing 30-second retry cadence; cache only a
+                # verified opening price and never backfill an expired window.
+                rms = int(time.time()*1000)
+                reference = event_reference(m, market_reference(m, rms), self.event_details.get(slug))
+                reference = page_reference(m, reference, self.page_details.get(slug))
+                cached = client_price_reference(m, reference, self.client_price_details.get(slug),
+                                                event_detail=self.event_details.get(slug))
+                if (start*1000 <= rms < (start+300)*1000 and cached.get('published_price_to_beat') is None
+                        and reference.get('published_price_to_beat') is None
+                        and not reference.get('price_to_beat_conflict')):
+                    try:
+                        request = opening_price_request(m, reference, rms, slug=slug,
+                                                        event_detail=self.event_details.get(slug))
+                        payload = await self.c.get(request['source_url'], request['params'])
+                        received_ms = int(time.time()*1000)
+                        self.c.raw('micro_official_price_response', {'request': request, 'response': payload,
+                                                                   'received_ms': received_ms})
+                        detail = parse_opening_price_response(payload, m, reference, request, received_ms,
+                                                              event_detail=self.event_details.get(slug))
+                        if detail:
+                            self.client_price_details[slug] = detail
+                            self.c.raw('micro_official_opening_reference', detail)
+                        else:
+                            self.c.error('micro_official_price', ValueError('Official client API has no complete opening price'))
+                    except OPTIONAL_ERRORS as exc:
+                        self.c.error('micro_official_price', exc)
                 ms = int(time.time()*1000)
                 self.set_market(m,ms)
                 current = int(slug.rsplit('-',1)[1])+300 > now

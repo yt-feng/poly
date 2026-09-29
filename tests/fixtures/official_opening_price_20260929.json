@@ -1,0 +1,33 @@
+{
+  "live_market": {
+    "slug": "btc-updown-5m-1790683500",
+    "conditionId": "0xebcac1aea7db3e1a54fba50f5da155ea6754a23ef700b9e47a4f0c2448963788",
+    "eventStartTime": "2026-09-29T12:05:00Z",
+    "endDate": "2026-09-29T12:10:00Z",
+    "cryptoMarketConfig": {
+      "id": "btc-5m-twap-60",
+      "asset": "btc",
+      "duration": "5m",
+      "twapEnabled": true,
+      "twapLookbackSeconds": 60
+    },
+    "resolutionSource": "https://data.chain.link/streams/btc-usd-twap-60s-streams"
+  },
+  "live_response": {
+    "openPrice": 84380.55985779637,
+    "closePrice": null,
+    "timestamp": 1790683547484,
+    "completed": false,
+    "incomplete": true,
+    "cached": true
+  },
+  "historical_response": {
+    "openPrice": 83759.96368136755,
+    "closePrice": 83756.05446033228,
+    "timestamp": 1790683435931,
+    "completed": true,
+    "incomplete": false,
+    "cached": true
+  },
+  "source": "Official GET /api/crypto/crypto-price and corresponding Gamma market captured 2026-09-29; condition identity comes from Gamma/request, not response."
+}
