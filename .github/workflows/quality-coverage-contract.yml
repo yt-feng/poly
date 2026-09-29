@@ -1,0 +1,43 @@
+name: quality-coverage-contract
+on:
+  pull_request:
+    paths: ['quality_v2.py', 'daily_quality_v2.py', 'tests/test_quality_contract.py', '.github/workflows/quality-coverage-contract.yml']
+  push:
+    branches: [main]
+    paths: ['quality_v2.py', 'daily_quality_v2.py', 'tests/test_quality_contract.py', '.github/workflows/quality-coverage-contract.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-v2.txt
+      - name: New synthetic quality regressions and existing collector suite
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile existing quality entry points
+        run: python -m py_compile quality_v2.py daily_quality_v2.py
+      - name: Package only generic source and tests
+        run: |
+          python - <<'PY'
+          import hashlib,json,zipfile
+          from pathlib import Path
+          names=['quality_v2.py','daily_quality_v2.py','archive_v2.py','tests/test_quality_contract.py']
+          m={n:hashlib.sha256(Path(n).read_bytes()).hexdigest() for n in names}
+          with zipfile.ZipFile('quality_tools.zip','w',zipfile.ZIP_DEFLATED) as z:
+              for n in names:z.write(n,n)
+              z.writestr('manifest.json',json.dumps(m,sort_keys=True,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quality-tools-${{ github.run_id }}
+          path: quality_tools.zip
+          if-no-files-found: error
+          retention-days: 14
