@@ -32,10 +32,44 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements-v2.txt
-      - name: Public feeds smoke test, no trading credentials
-        run: python -u capture_v3.py --assets btc --seconds 120 --output smoke_v2 --require-core --require-microstructure
+      - name: Public feeds smoke test across a five-minute window boundary
+        run: python -u capture_v3.py --assets btc --seconds 360 --output smoke_v2 --require-core --require-microstructure
       - name: Verify separately labelled Chainlink live observations
         run: python -c 'import json; h=json.load(open("smoke_v2/health.json")); assert h["valid_snapshot_counts"].get("chainlink",0) >= 5, h'
+      - name: Extract bounded official-price evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import gzip, json
+          from pathlib import Path
+          root = Path('smoke_v2')
+          root.mkdir(exist_ok=True)
+          wanted = {'micro_official_price_http', 'micro_official_price_response', 'micro_official_opening_reference'}
+          entries, matched = [], 0
+          for path in sorted(root.glob('raw-*.jsonl.gz')):
+              with gzip.open(path, 'rb') as stream:
+                  for line in stream:
+                      if b'micro_official_' not in line:
+                          continue
+                      row = json.loads(line)
+                      if row.get('source') in wanted:
+                          matched += 1
+                          if len(entries) < 100:
+                              entries.append(row)
+          (root / 'official-price-evidence.json').write_text(json.dumps({
+              'matched_records': matched, 'truncated': matched > len(entries), 'records': entries
+          }, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-v2-smoke-summary-${{ github.run_id }}
+          path: |
+            smoke_v2/health.json
+            smoke_v2/quality.json
+            smoke_v2/manifest.json
+            smoke_v2/official-price-evidence.json
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
