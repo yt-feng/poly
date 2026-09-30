@@ -49,6 +49,21 @@ def book_features(payload, binary=False):
     for n in (1, 5, 10, 20):
         b, a = out[f'bid_depth{n}'], out[f'ask_depth{n}']
         out[f'imbalance{n}'] = (b-a)/(b+a) if b is not None and a is not None and b+a else None
+    # Retain bounded price/quantity ladders from this SAME public response.
+    # Top-of-book capacity alone cannot price a multi-level sweep. Do not infer
+    # missing prices from depth totals or certify any real queue/fill.
+    if binary:
+        cap = 20
+        out['observed_ladder'] = {
+            'schema_version': 1,
+            'basis': 'normalized_same_public_book_response',
+            'max_levels_per_side': cap,
+            'bids': [[str(p), str(q)] for p, q in bids[:cap]],
+            'asks': [[str(p), str(q)] for p, q in asks[:cap]],
+            'bids_truncated': len(bids) > cap,
+            'asks_truncated': len(asks) > cap,
+            'execution_certified': False,
+        }
     out['crossed'] = bool(bids and asks and bids[0][0] > asks[0][0])
     out['mid'] = out['spread'] = out['microprice'] = None
     if bids and asks and not out['crossed']:
