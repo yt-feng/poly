@@ -14,6 +14,7 @@ import re
 import sys
 from archive_v2 import atomic_json,gh,publish,sha256,error_details,safe_diagnostic
 from quality_v2 import report
+from release_inventory_v2 import list_capture_releases
 
 
 def list_release_assets(repo,release_id,*,call=None,per_page=100,max_pages=200,on_page=None):
@@ -97,32 +98,10 @@ def main(args):
         repo=os.environ['GH_REPO']
         if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo):
             raise ValueError('Invalid repository identity')
-        releases=[]; pages=0; seen={}
-        for page in range(1,101):
-            endpoint=f'repos/{repo}/releases?per_page=100&page={page}'
-            stage('release_inventory',page=page,endpoint=endpoint)
-            batch=json.loads(gh('api',endpoint,timeout=30))
-            pages+=1
-            if not isinstance(batch,list) or len(batch)>100:raise ValueError('Invalid release page')
-            if not batch:break
-            added=0; created=[]
-            for item in batch:
-                if (not isinstance(item,dict) or type(item.get('id')) is not int or item['id']<=0
-                        or not isinstance(item.get('tag_name'),str) or not isinstance(item.get('created_at'),str)):
-                    raise ValueError('Invalid release identity')
-                timestamp=datetime.fromisoformat(item['created_at'].replace('Z','+00:00'))
-                if timestamp.tzinfo is None:raise ValueError('Release timestamp requires timezone')
-                created.append(timestamp)
-                identity=(item['tag_name'],item['created_at'])
-                if item['id'] in seen:
-                    if seen[item['id']]!=identity:raise ValueError('Release changed during pagination')
-                    continue
-                seen[item['id']]=identity; added+=1
-                if item['tag_name'].startswith('capture-v2-'):releases.append(item)
-            if not added:raise RuntimeError('Release pagination did not advance')
-            if min(created)<cutoff:break
-        else:
-            raise RuntimeError('Release listing exceeded pagination bound')
+        releases,discovery=list_capture_releases(repo,cutoff,call=gh,on_page=lambda page,cursor:
+            stage('release_inventory',page=page,endpoint='graphql',repository=repo,
+                  operation='CaptureReleaseInventory',cursor=cursor or '[initial]',
+                  cutoff_utc=cutoff.isoformat(),cutoff_field='GraphQL Release.createdAt'))
         assets=args.assets.split(',')
         downloaded=[]; inventory=[]
         for release in releases:
@@ -133,7 +112,10 @@ def main(args):
                 stage('asset_inventory',release=tag,release_id=release['id'],page=page,endpoint=endpoint))
             by_name={x['name']:x for x in listing}
             selected=sorted(n for n in by_name if n.startswith('snapshots-'+day+'-') and n.endswith('.jsonl.gz'))
-            inventory.append(dict(release=tag,release_id=release['id'],asset_pages=count,listed_assets=len(listing),selected_archives=len(selected)))
+            inventory.append(dict(release=tag,release_id=release['id'],
+                                  release_created_at=release['release_created_at'],
+                                  release_published_at=release['release_published_at'],
+                                  asset_pages=count,listed_assets=len(listing),selected_archives=len(selected)))
             if not selected:continue
             target=args.output/tag; target.mkdir(exist_ok=True)
             for name in selected:
@@ -160,7 +142,8 @@ def main(args):
         # schema, never a replacement quality.json with invented zero coverage.
         staged=args.output/'.report-staging'/'quality.json'
         result=report(args.output,staged,day,assets)
-        result.update(release_assets_checked=downloaded,release_pages_scanned=pages,
+        result.update(release_assets_checked=downloaded,release_pages_scanned=discovery['pages'],
+                      release_discovery=discovery,
                       release_asset_inventory=inventory,asset_pagination=True,
                       release_discovery_cutoff_utc=cutoff.isoformat(),
                       full_history_complete=False,
