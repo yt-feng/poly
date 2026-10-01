@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 import threading
@@ -31,23 +32,113 @@ def atomic_json(path: Path, obj) -> None:
     temp.replace(path)
 
 
+def safe_diagnostic(value, limit=2000) -> str:
+    """Bound diagnostics, never subprocess stdout, and remove common credentials."""
+    text = value.decode('utf-8', errors='replace') if isinstance(value, bytes) else ('' if value is None else str(value))
+    for name in ('GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'):
+        secret = os.environ.get(name)
+        if secret:
+            text = text.replace(secret, '[REDACTED]')
+    text = re.sub(r'\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b', '[REDACTED]', text)
+    text = re.sub(r'(?im)\b(authorization|proxy-authorization|cookie|set-cookie)\s*:[^\r\n]*', r'\1: [REDACTED]', text)
+    text = re.sub(r'(?i)([?&](?:access_token|token|key|api_key|signature)=)[^&\s]+', r'\1[REDACTED]', text)
+    text = re.sub(r'(https?://)[^/\s@]+@', r'\1[REDACTED]@', text)
+    text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
+    text = ''.join(c for c in text if c in '\n\t' or ord(c) >= 32)
+    return text if len(text) <= limit else text[:limit] + ' [truncated]'
+
+
+def _safe_read(args) -> bool:
+    # Deliberate allowlist: gh api fields/input imply POST, and unknown flags or
+    # commands must not accidentally make a remote mutation replayable.
+    if len(args) >= 2 and args[0] == 'api' and re.match(r'^repos/[^/]+/[^/]+/', args[1]):
+        return args[2:] in ((), ('--method', 'GET'), ('-X', 'GET'))
+    if len(args) >= 3 and args[:2] == ('release', 'view') and not args[2].startswith('-'):
+        return not args[3:] or (len(args) == 5 and args[3] == '--json')
+    # Re-downloading identical assets is safe only with explicit replacement of
+    # a partial local file. No retry is added to upload/create/dispatch.
+    return (len(args) == 8 and args[:2] == ('release', 'download')
+            and not args[2].startswith('-') and args[3] == '--pattern'
+            and args[5] == '--dir' and args[7] == '--clobber')
+
+
+def _transient(stderr, *, timed_out=False) -> bool:
+    # Classify the complete diagnostic: a permanent HTTP status beyond the
+    # display limit must still veto retries. Only retained/emitted text is
+    # redacted and shortened by safe_diagnostic().
+    text = (stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes)
+            else str(stderr or '')).lower()
+    statuses = re.findall(r'\bhttp(?:/\d(?:\.\d)?)?\s+(\d{3})\b', text)
+    if any(400 <= int(s) < 500 and s != '429' for s in statuses):
+        return False
+    return (timed_out or any(s in {'429', '500', '502', '503', '504'} for s in statuses)
+            or any(s in text for s in ('tls handshake timeout', 'i/o timeout',
+                                       'connection reset by peer', 'unexpected eof',
+                                       'context deadline exceeded')))
+
+
+class GhCommandError(subprocess.CalledProcessError):
+    def __str__(self):
+        return super().__str__() + f' Attempts: {self.attempts}. stderr: {self.stderr or "[empty]"}'
+
+
+class GhTimeoutError(subprocess.TimeoutExpired):
+    def __str__(self):
+        return super().__str__() + f' Attempts: {self.attempts}. stderr: {self.stderr or "[empty]"}'
+
+
+def error_details(error) -> dict:
+    result = {'type': type(error).__name__, 'message': safe_diagnostic(str(error))}
+    if isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+        command = error.cmd if isinstance(error.cmd, (list, tuple)) else [error.cmd]
+        result.update(command=safe_diagnostic(' '.join(map(str, command))),
+                      stderr=safe_diagnostic(error.stderr), attempts=getattr(error, 'attempts', 1),
+                      retryable=getattr(error, 'retryable', False))
+        if isinstance(error, subprocess.CalledProcessError):
+            result['returncode'] = error.returncode
+        else:
+            result['timeout_seconds'] = error.timeout
+    return result
+
+
 def gh(*args: str, timeout: float | None = None, deadline: float | None = None) -> str:
-    if deadline is not None:
-        remaining = deadline-time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError('Release publication deadline exhausted; retain recovery files')
-        timeout = min(timeout, remaining) if timeout is not None else remaining
-    return subprocess.run(['gh', *args], check=True, text=True,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          timeout=timeout).stdout
+    read = _safe_read(args)
+    for attempt in range(1, 5):  # Initial read plus at most three same-command retries.
+        attempt_timeout = timeout if timeout is not None else (30 if read else None)
+        if deadline is not None:
+            remaining = deadline-time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Release publication deadline exhausted; retain recovery files')
+            attempt_timeout = min(attempt_timeout, remaining) if attempt_timeout is not None else remaining
+        try:
+            return subprocess.run(['gh', *args], check=True, text=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  timeout=attempt_timeout).stdout
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as original:
+            retryable = read and _transient(original.stderr, timed_out=isinstance(original, subprocess.TimeoutExpired))
+            command = [safe_diagnostic(x, 256) for x in ['gh', *args]]
+            stderr = safe_diagnostic(original.stderr)
+            if isinstance(original, subprocess.TimeoutExpired):
+                error = GhTimeoutError(command, original.timeout, stderr=stderr)
+            else:
+                error = GhCommandError(original.returncode, command, stderr=stderr)
+            error.attempts, error.retryable = attempt, retryable
+            delay = 2 ** (attempt-1)
+            if (not retryable or attempt == 4
+                    or (deadline is not None and time.monotonic()+delay >= deadline)):
+                raise error from None
+            time.sleep(delay)
 
 
 def ensure_release(tag: str, *, timeout: float | None = None,
                    deadline: float | None = None) -> None:
     try:
         gh('release', 'view', tag, timeout=timeout, deadline=deadline)
-    except subprocess.CalledProcessError:
-        # Any authorization failure also fails creation; never mark an upload done.
+    except subprocess.CalledProcessError as error:
+        # A failed read is not evidence that the release is absent. In particular,
+        # a timeout/authorization/server error must never trigger a blind create.
+        if str(error.stderr or '').strip().lower() != 'release not found':
+            raise
         gh('release', 'create', tag, '--target', 'main', '--title', tag,
            '--notes', 'Append-only public market-data archive; see CAPTURE_V2.md.',
            '--latest=false', timeout=timeout, deadline=deadline)

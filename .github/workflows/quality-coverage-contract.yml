@@ -1,10 +1,10 @@
 name: quality-coverage-contract
 on:
   pull_request:
-    paths: ['quality_v2.py', 'daily_quality_v2.py', 'tests/test_quality_contract.py', '.github/workflows/quality-coverage-contract.yml']
+    paths: ['archive_v2.py', 'quality_v2.py', 'daily_quality_v2.py', 'tests/test_quality_contract.py', 'tests/test_quality_recovery.py', '.github/workflows/daily-quality-v2.yml', '.github/workflows/quality-coverage-contract.yml']
   push:
     branches: [main]
-    paths: ['quality_v2.py', 'daily_quality_v2.py', 'tests/test_quality_contract.py', '.github/workflows/quality-coverage-contract.yml']
+    paths: ['archive_v2.py', 'quality_v2.py', 'daily_quality_v2.py', 'tests/test_quality_contract.py', 'tests/test_quality_recovery.py', '.github/workflows/daily-quality-v2.yml', '.github/workflows/quality-coverage-contract.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,13 +23,13 @@ jobs:
       - name: New synthetic quality regressions and existing collector suite
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Compile existing quality entry points
-        run: python -m py_compile quality_v2.py daily_quality_v2.py
+        run: python -m py_compile archive_v2.py quality_v2.py daily_quality_v2.py
       - name: Package only generic source and tests
         run: |
           python - <<'PY'
           import hashlib,json,zipfile
           from pathlib import Path
-          names=['quality_v2.py','daily_quality_v2.py','archive_v2.py','tests/test_quality_contract.py']
+          names=['quality_v2.py','daily_quality_v2.py','archive_v2.py','tests/test_quality_contract.py','tests/test_quality_recovery.py']
           m={n:hashlib.sha256(Path(n).read_bytes()).hexdigest() for n in names}
           with zipfile.ZipFile('quality_tools.zip','w',zipfile.ZIP_DEFLATED) as z:
               for n in names:z.write(n,n)

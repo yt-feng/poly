@@ -41,3 +41,4 @@ jobs:
             daily_quality_output/*.json
             daily_quality_output/*.md
           retention-days: 30
+          if-no-files-found: error
