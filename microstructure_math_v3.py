@@ -250,8 +250,8 @@ class TradeFlow:
 
     def summarize(self, now, connected):
         out = {'basis': 'locally_received_messages', 'complete_trade_tape': False,
-               'connected': bool(connected), 'last_trade_received_ms': self.last_received}
-        out['signed_notional_since_connection'] = self.total_signed
+               'connected': bool(connected), 'last_trade_received_ms': self.last_received,
+               'signed_notional_since_connection': self.total_signed}
         for s in (1,5,15,60):
             rows = [r for r in self.rows if now-s*1000 < r[0] <= now]
             buy = sum(r[1] for r in rows if r[2] == 1)
@@ -304,7 +304,7 @@ def event_reference(market, reference, detail):
     if value is not None and value > 0:
         if r.get('published_price_to_beat') is not None and decimal(r['published_price_to_beat']) != value:
             evidence = reference_conflict_evidence(r, value,
-                'gamma.events/slug/{slug}.eventMetadata.priceToBeat', detail['received_ms'])
+                'gamma.events/slug/{slug}.eventMetadata.priceToBeat', detail.get('received_ms'))
             r.update(published_price_to_beat=None,price_to_beat_path=None,price_to_beat_received_ms=None,
                      price_to_beat_conflict=True,price_to_beat_conflict_evidence=evidence)
         else:
