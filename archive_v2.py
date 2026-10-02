@@ -11,7 +11,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import tempfile
 import time
 import threading
 from datetime import datetime, timezone
@@ -153,10 +155,26 @@ def publish(tag: str, paths: list[Path], *, replace: bool = False,
         return
     ensure_release(tag, timeout=timeout, deadline=deadline)
     for path in paths:
-        args = ['release', 'upload', tag, str(path)]
-        if replace:
-            args.append('--clobber')
-        gh(*args, timeout=timeout, deadline=deadline)
+        def upload(source):
+            args = ['release', 'upload', tag, str(source)]
+            if replace:
+                args.append('--clobber')
+            gh(*args, timeout=timeout, deadline=deadline)
+
+        if path.suffix not in {'.json', '.md'}:
+            # Closed archive segments/checksums are immutable and can be large.
+            upload(path)
+            continue
+        # The sampler atomically replaces live metadata while this publication
+        # thread runs. gh stats and then opens the path separately; a replacement
+        # between those operations changes Content-Length. Pin one source inode
+        # while copying, then give gh a private, stable path with the same asset
+        # name. Keep the shared deadline and never replay a failed write here.
+        with tempfile.TemporaryDirectory(prefix='poly-publish-') as temporary:
+            snapshot = Path(temporary) / path.name
+            with path.open('rb') as source, snapshot.open('wb') as destination:
+                shutil.copyfileobj(source, destination)
+            upload(snapshot)
 
 
 class Archive:
