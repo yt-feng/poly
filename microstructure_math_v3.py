@@ -173,6 +173,42 @@ def market_reference(market, received_ms):
             'rewards_min_size': market.get('rewardsMinSize'), 'rewards_max_spread': market.get('rewardsMaxSpread')}
 
 
+def reference_conflict_evidence(reference, incoming_value, incoming_path, incoming_received_ms):
+    """Retain the values an existing importer is about to discard.
+
+    Called only after the importer's existing identity/availability checks and
+    disagreement branch. These are recorded importer times, not certified wire
+    arrival times or oracle ticks. No source is chosen and no gate is changed.
+    """
+    def price_text(value):
+        parsed = decimal(value)
+        return str(parsed) if parsed is not None else None
+    def stamp(value):
+        return value if type(value) is int and value >= 0 else None
+    def text(value):
+        return value if isinstance(value, str) else None
+    return {
+        'schema_version': 1,
+        'status': 'unresolved_source_disagreement',
+        'comparison': 'existing_exact_decimal_policy',
+        'evaluated_at_ms': stamp(reference.get('metadata_received_ms')),
+        'slug': text(reference.get('slug')),
+        'condition_id': text(reference.get('condition_id')),
+        'reference_kind': text(reference.get('reference_kind')),
+        'observations': [
+            {'value': price_text(reference.get('published_price_to_beat')),
+             'path': text(reference.get('price_to_beat_path')),
+             'recorded_received_ms': stamp(reference.get('price_to_beat_received_ms'))},
+            {'value': price_text(incoming_value), 'path': text(incoming_path),
+             'recorded_received_ms': stamp(incoming_received_ms)},
+        ],
+        'selected_source': None,
+        'upstream_cause': 'not_established',
+        'recorded_times_are_not_oracle_ticks': True,
+        'external_truth_authenticated': False,
+    }
+
+
 def twap_price(payload):
     with localcontext() as ctx:
         ctx.prec = 60
@@ -267,8 +303,10 @@ def event_reference(market, reference, detail):
     value = decimal(meta.get('priceToBeat')) if isinstance(meta,dict) else None
     if value is not None and value > 0:
         if r.get('published_price_to_beat') is not None and decimal(r['published_price_to_beat']) != value:
+            evidence = reference_conflict_evidence(r, value,
+                'gamma.events/slug/{slug}.eventMetadata.priceToBeat', detail.get('received_ms'))
             r.update(published_price_to_beat=None,price_to_beat_path=None,price_to_beat_received_ms=None,
-                     price_to_beat_conflict=True)
+                     price_to_beat_conflict=True,price_to_beat_conflict_evidence=evidence)
         else:
             r.update(published_price_to_beat=str(value),
                 price_to_beat_path='gamma.events/slug/{slug}.eventMetadata.priceToBeat',

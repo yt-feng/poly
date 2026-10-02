@@ -10,7 +10,7 @@ import json
 import re
 from urllib.parse import urlsplit
 
-from microstructure_math_v3 import decimal
+from microstructure_math_v3 import decimal, reference_conflict_evidence
 
 OFFICIAL_PRICE_URL = 'https://polymarket.com/api/crypto/crypto-price'
 
@@ -280,8 +280,13 @@ def page_reference(market, reference, detail):
         return r
     existing = decimal(r.get('published_price_to_beat'))
     if existing is not None and existing != value:
+        path = ('polymarket.client_api.crypto-price.openPrice'
+                if detail.get('source_url') == OFFICIAL_PRICE_URL
+                else 'polymarket.event_page.crypto-prices.openPrice')
+        evidence = reference_conflict_evidence(r, value, path, detail['received_ms'])
         r.update(published_price_to_beat=None, price_to_beat_path=None,
-                 price_to_beat_received_ms=None, price_to_beat_conflict=True)
+                 price_to_beat_received_ms=None, price_to_beat_conflict=True,
+                 price_to_beat_conflict_evidence=evidence)
     elif existing is None:
         r.update(published_price_to_beat=str(value),
                  price_to_beat_path='polymarket.event_page.crypto-prices.openPrice',
