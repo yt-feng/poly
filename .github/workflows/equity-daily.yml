@@ -1,0 +1,117 @@
+name: equity-daily-raw-capture
+on:
+  push:
+    branches: [main]
+    paths: ['equity_daily/**', '.github/workflows/equity-daily.yml']
+  pull_request:
+    paths: ['equity_daily/**', '.github/workflows/equity-daily.yml']
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */4 * * *'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: equity_daily
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r equity_daily/requirements.txt
+      - run: python -m unittest discover -s equity_daily/tests -p 'test_*.py' -v
+      - name: No imports into BTC capture or strategy modules
+        run: python -m compileall -q equity_daily
+  smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: equity_daily
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r equity_daily/requirements.txt
+      - name: Public read-only live smoke; no account credentials or trading
+        run: python -u -m equity_daily.collector --output equity_daily_smoke --seconds 150 --checkpoint-seconds 45
+      - name: Print observed coverage, including missing feeds
+        if: always()
+        run: |
+          if [ -f equity_daily_smoke/health.json ]; then
+            cat equity_daily_smoke/health.json
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: equity-daily-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: equity_daily_smoke/
+          retention-days: 7
+          compression-level: 0
+  capture:
+    needs: [test, smoke]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 280
+    permissions:
+      contents: write
+    concurrency:
+      group: equity-daily-raw-production
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      APCA_API_KEY_ID: ${{ secrets.EQUITY_ALPACA_KEY_ID }}
+      APCA_API_SECRET_KEY: ${{ secrets.EQUITY_ALPACA_SECRET_KEY }}
+      EQUITY_ARCHIVE_KEY: ${{ secrets.EQUITY_ARCHIVE_KEY }}
+      EQUITY_ALPACA_FEED: ${{ vars.EQUITY_ALPACA_FEED || 'iex' }}
+      EQUITY_ALPACA_SYMBOLS: ${{ vars.EQUITY_ALPACA_SYMBOLS }}
+      EQUITY_ALPACA_PUBLIC_REDISTRIBUTION: ${{ vars.EQUITY_ALPACA_PUBLIC_REDISTRIBUTION || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: equity_daily
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r equity_daily/requirements.txt
+      - name: Four-hour independent raw capture with rolling durable checkpoints
+        run: |
+          python -u -m equity_daily.collector \
+            --output equity_daily_output \
+            --seconds 14400 --checkpoint-seconds 300 \
+            --release "equity-daily-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+      - name: Retry publishing closed segments after collector exit
+        if: always()
+        run: |
+          if [ -d equity_daily_output ]; then
+            python -m equity_daily.github_archive --root equity_daily_output \
+              --tag "equity-daily-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          fi
+      - name: Diagnostic summary only; raw data lives in Releases
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: equity-daily-health-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            equity_daily_output/health.json
+            equity_daily_output/catalog.json
+            equity_daily_output/manifest-*.json
+          retention-days: 7
+      - name: Recover encrypted or public closed bundles after failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: equity-daily-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            equity_daily_output/equity-daily-bundle-*.tar
+            equity_daily_output/equity-daily-bundle-*.tar.sha256
+          compression-level: 0
+          retention-days: 7
