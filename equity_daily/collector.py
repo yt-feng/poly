@@ -154,13 +154,16 @@ class Collector(DiscoveryMixin):
                                                      'checked_at_ns': time.time_ns()}
                         return
                     meta = result[0].get('meta', {})
-                    self.symbol_status[symbol] = dict(state='chart_received', checked_at_ns=time.time_ns(),
+                    self.symbol_status[symbol] = dict(state='chart_received' if result[0].get('timestamp') else 'metadata_only_no_bars',
+                        observed_bar_count=len(result[0].get('timestamp') or []), checked_at_ns=time.time_ns(),
                         provider_symbol=meta.get('symbol'), provider_symbol_validated=str(meta.get('symbol','')).upper()==symbol.upper(),
                         instrument_type=meta.get('instrumentType'), exchange_timezone=meta.get('exchangeTimezoneName'),
                         exchange=meta.get('exchangeName'), data_granularity=meta.get('dataGranularity'),
                         exchange_data_delayed_by=meta.get('exchangeDataDelayedBy'),
                         latest_source_timestamp=(result[0].get('timestamp') or [None])[-1])
                     self.stats['yahoo_chart_success'] += 1
+                    if result[0].get('timestamp'):
+                        self.stats['yahoo_nonempty_chart_success'] += 1
                     initial.add(symbol)
                     if time.time()-daily_at.get(symbol, 0) >= 3600:
                         daily_status, daily = await self.http.get('underlying_yahoo_daily', url,
@@ -206,19 +209,45 @@ class Collector(DiscoveryMixin):
         return False
 
     async def history(self, token):
-        status, value = await self.http.get('history_http', DATA+'/v2/prices-history',
-            {'token_id': token, 'interval': '1d', 'bucket_seconds': 60},
-            context={'requested_bucket_seconds': 60, 'reconstructs_orderbook': False, 'purpose': 'sampled_backfill_not_native_ticks'})
-        if status in (404, 405):
-            status, value = await self.http.get('history_http', CLOB+'/prices-history',
-                {'market': token, 'interval': 'max', 'fidelity': 1},
-                context={'legacy_fidelity_minutes': 1, 'reconstructs_orderbook': False})
-        return status == 200
+        # Windowed backfill is paginated, never confused with native WS ticks.
+        params = {'token_id': token, 'interval': '1d', 'bucket_seconds': 60}
+        seen, points, complete = set(), 0, False
+        for page in range(100):
+            status, value = await self.http.get('history_http', DATA+'/v2/prices-history', params,
+                context={'requested_bucket_seconds': 60, 'reconstructs_orderbook': False,
+                         'purpose': 'sampled_backfill_not_native_ticks', 'page': page})
+            if page == 0 and status in (404, 405):
+                status, value = await self.http.get('history_http', CLOB+'/prices-history',
+                    {'market': token, 'interval': 'max', 'fidelity': 1},
+                    context={'legacy_fidelity_minutes': 1, 'reconstructs_orderbook': False})
+                return status == 200 and isinstance(value, dict) and isinstance(value.get('history'), list)
+            if status != 200 or not isinstance(value, dict) or not isinstance(value.get('data'), list):
+                break
+            points += len(value['data'])
+            cursor = cursor_of(value)
+            if cursor:
+                if cursor in seen:
+                    break
+                seen.add(cursor)
+                params['cursor'] = cursor
+            elif (value.get('pagination') or {}).get('has_more'):
+                break
+            else:
+                complete = True
+                break
+        self.journal.emit('audit', dict(event='history_backfill_window', token_id=token,
+            pagination_complete=complete, points_returned=points, pages=page+1,
+            requested_window='1d', requested_bucket_seconds=60, all_time_complete=False))
+        self.stats['history_complete_windows' if complete else 'history_incomplete_windows'] += 1
+        return complete
 
     async def analytics_loop(self):
         watermark, history_at, resolution_at, details_at = {}, {}, {}, {}
         while True:
-            for r in list(self.catalog.values()):
+            # Today's open events first; do not let newly listed future contracts
+            # postpone trade/history capture for the session currently trading.
+            ordered = sorted(self.catalog.values(), key=lambda r: (bool(r['closed']), abs((epoch(r['end_date_utc']) or 0)-time.time())))
+            for r in ordered:
                 mid, now = r['market_id'], int(time.time())
                 due = 3600 if r['closed'] else 120
                 if now-watermark.get(mid, 0) >= due:

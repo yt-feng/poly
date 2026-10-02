@@ -15,11 +15,11 @@ from . import FAMILY, SCHEMA_VERSION
 
 CRYPTO = re.compile(r'\b(bitcoin|ethereum|btc|eth|solana|sol|dogecoin|doge|xrp|crypto)\b', re.I)
 SHORT_WINDOW = re.compile(r'\b\d+\s*(?:min(?:ute)?s?|hours?|hrs?)\b|updown-(?:5m|15m|1h|4h)', re.I)
-LONG_WINDOW = re.compile(r'\b(weekly|monthly|quarterly|this week|this month|end of (?:the )?(?:month|year)|by (?:the end of )?20\d\d)\b', re.I)
+LONG_WINDOW = re.compile(r'\b(weekly|week of|monthly|quarterly|this week|this month|end of (?:the )?(?:month|year)|by (?:the end of )?20\d\d)\b', re.I)
 DIRECTION = re.compile(r'\bup\s*(?:or|/)\s*down\b', re.I)
 CLOSE = re.compile(r'\bclos(?:e|es|ing)\b.*\b(above|below|between|over|under|at least|at most)\b', re.I)
 DAY = re.compile(r'\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2}\b|\b20\d\d-\d\d-\d\d\b|\b(?:today|tomorrow|daily)\b', re.I)
-SYMBOL = re.compile(r'\(([A-Z0-9^][A-Z0-9.^=-]{0,11})\)')
+SYMBOL = re.compile(r'\(([A-Z0-9^][A-Z0-9./^=-]{0,11})\)')
 # These are identifier translations, NOT a closed universe. New equity tickers
 # are discovered from titles/rules automatically; unresolved names are retained.
 ALIASES = {
@@ -33,6 +33,13 @@ ALIASES = {
     'SP500': ('^GSPC', 'index', 'index_reference'),
     'HSI': ('^HSI', 'index', 'index_reference'),
     'VIX': ('^VIX', 'index', 'index_reference'),
+    'DAX': ('^GDAXI', 'index', 'index_reference'),
+    'UKX': ('^FTSE', 'index', 'index_reference'),
+    'FTSE': ('^FTSE', 'index', 'index_reference'),
+    'NIK': ('^N225', 'index', 'index_reference'),
+    'DXY': ('DX-Y.NYB', 'index', 'index_reference'),
+    'XAUUSD': ('GC=F', 'commodity', 'continuous_futures_proxy_not_spot'),
+    'XAGUSD': ('SI=F', 'commodity', 'continuous_futures_proxy_not_spot'),
     'GC': ('GC=F', 'commodity', 'continuous_futures_proxy_not_contract'),
     'SI': ('SI=F', 'commodity', 'continuous_futures_proxy_not_contract'),
     'CL': ('CL=F', 'commodity', 'continuous_futures_proxy_not_contract'),
@@ -83,6 +90,8 @@ def classify(market: dict, event: dict | None = None) -> tuple[dict | None, str]
     kind = 'daily_direction' if DIRECTION.search(text) else ('close_threshold' if CLOSE.search(text) else None)
     if not kind:
         return None, 'not_supported_daily_price_event'
+    if kind == 'daily_direction' and re.search(r'\bopens?\s+up\s+or\s+down\b', text, re.I):
+        kind = 'daily_open_direction'
     if not DAY.search(text + ' ' + slug):
         return None, 'daily_date_unconfirmed'
     end = market.get('endDate') or event.get('endDate')
@@ -99,6 +108,10 @@ def classify(market: dict, event: dict | None = None) -> tuple[dict | None, str]
     ticker = ticker_hits[0] if len(set(ticker_hits)) == 1 else None
     evidence = 'title_parenthesized_symbol' if ticker else None
     if not ticker:
+        prefix = re.match(r'^([A-Z][A-Z0-9.\-]{0,11})\s+(?:[Oo]pens?\s+)?(?:[Uu]p\s+or\s+[Dd]own|[Cc]loses?)\b', question or title)
+        if prefix:
+            ticker, evidence = prefix[1], 'title_leading_symbol_requires_provider_validation'
+    if not ticker:
         matches = {v for k, v in NAMES.items() if re.search(r'\b' + re.escape(k) + r'\b', text, re.I)}
         if len(matches) == 1:
             ticker = matches.pop()
@@ -110,6 +123,18 @@ def classify(market: dict, event: dict | None = None) -> tuple[dict | None, str]
     yahoo, asset_class, relation = None, 'unmapped', 'unresolved'
     if ticker:
         yahoo, asset_class, relation = ALIASES.get(ticker, (ticker, 'equity_candidate', 'symbol_requires_provider_validation'))
+        if ticker == 'WTI' and re.search(r'\b(?:crude|oil)\b', text, re.I):
+            yahoo, asset_class, relation = 'CL=F', 'commodity', 'continuous_futures_proxy_not_contract'
+            evidence = 'title_crude_oil_disambiguation_not_WT_Offshore_stock'
+    if ticker and re.fullmatch(r'[A-Z]{3}/[A-Z]{3}', ticker):
+        base, counter = ticker.split('/')
+        fiat = {'USD','EUR','GBP','JPY','CHF','BRL','TRY','ZAR','SEK','NOK','MXN','KRW','AUD','CAD','NZD','HKD','SGD','CNY','INR'}
+        if base in fiat and counter in fiat:
+            yahoo = (counter if base == 'USD' else base+counter) + '=X'
+            asset_class, relation = 'foreign_exchange', 'fx_reference_not_official_fixing'
+            evidence = 'title_currency_pair_requires_provider_validation'
+        else:
+            yahoo, asset_class, relation = None, 'unmapped', 'unresolved_currency_pair'
     if len(links) == 1:
         candidate = links.pop()
         if re.fullmatch(r'[A-Z0-9^][A-Z0-9.^=-]{0,19}', candidate):
@@ -125,6 +150,7 @@ def classify(market: dict, event: dict | None = None) -> tuple[dict | None, str]
         return None, 'not_identifiably_financial'
     if yahoo and (CRYPTO.search(yahoo) or yahoo.endswith(('-USD', '-USDT'))):
         return None, 'crypto_symbol_excluded'
+    pyth_refs = sorted({unquote(x) for x in re.findall(r'pythdata\.app/explore/([^\s?\"<>]+)', source_text, re.I)})
     record = dict(family=FAMILY, market_id=str(market.get('id', '')),
                   event_id=str(event.get('id', '')), condition_id=market.get('conditionId'),
                   question=question, event_title=title, market_slug=market.get('slug'),
@@ -133,6 +159,8 @@ def classify(market: dict, event: dict | None = None) -> tuple[dict | None, str]
                   ticker=ticker, yahoo_symbol=yahoo, asset_class=asset_class,
                   mapping_evidence=evidence, underlying_relation=relation,
                   underlying_is_official_settlement=False,
+                  oracle_reference_symbols=pyth_refs,
+                  oracle_prices_collected=False,
                   outcomes=[dict(label=str(label), token_id=str(token)) for label, token in zip(labels, tokens)],
                   active=market.get('active'), closed=market.get('closed'),
                   accepting_orders=market.get('acceptingOrders'),

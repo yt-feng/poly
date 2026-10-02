@@ -1,169 +1,169 @@
-# Equity / index / commodity daily raw-data capture
+# Daily finance raw-data capture
 
-Independent acquisition module in **yt-feng/poly**. It does not import, change,
-start or stop the BTC five-minute collectors, `capture_v2`/`capture_v3`, their
-release tags, their quality jobs, or anything in `yt-feng/poly_trade`.
-It does not access trading accounts, place orders or evaluate strategies.
+Independent, read-only acquisition in **yt-feng/poly**. Code, workflow, output,
+family keys and Release namespace are separate from BTC five-minute data.
+No existing BTC file/workflow or `yt-feng/poly_trade` is changed or imported.
+No trading account, order, strategy evaluation or live canary is enabled.
 
-## Acquisition scope
+## What is collected
 
-| Stream | What is retained | Resolution / limitations |
+| Source | Retained raw data | Granularity / limit |
 |---|---|---|
-| Polymarket market WebSocket | Original text/binary payload of every received frame; both outcome tokens; full books, price/size changes, best bid/ask, last-trade messages, tick changes, new-market and resolution messages, including unknown fields | Native received messages, no sampling or rounding. Not a guarantee of all exchange events; outages and missing tokens are reported. |
-| Polymarket REST books | Full book responses and hashes for both outcomes | Every 60 seconds, plus resnapshot requests on WS subscription/reconnection. Does not turn a missing WS interval into complete tick history. |
-| Gamma catalog and rules | Original listing responses, versioned accepted event/market objects, IDs, descriptions, resolution source, dates, outcome-token pairs, liquidity/volume/fee information returned by Gamma | Active discovery every 300 seconds; recent closed discovery every sixth cycle; default end-date window is previous 7 / next 8 days. Unknown or malformed candidates remain auditable. |
-| Polymarket trades / analytics | Paginated public trade responses, overlap retained, open interest, resolution progress, CLOB details including constraints/fees when returned | V2 API with documented legacy fallback for 404/405 where applicable. Pagination truncation is explicit, never labeled all-time complete. |
-| Polymarket price history | Original sampled history response | Request 60-second buckets; legacy fidelity=1 minute. This is a BACKFILL, not historic full-depth/tick replay. |
-| Yahoo WebSocket | Original base64/protobuf wrapper plus separately decoded available fields: price, native time, currency/exchange, quote type, market-hours flag, daily volume/high/low/change, previous close/open, bid/ask/sizes, last size and other supplied fields | **Unofficial provider quote updates, not exchange executions or NBBO.** Missing fields stay missing. Delay and throttling are not assumed away. |
-| Yahoo intraday chart | Entire unmodified response: timestamps, OHLCV arrays, metadata, trading periods, timezone, corporate-action and adjusted-close fields when supplied | 1-minute bars, include pre/post-market. First request 5d, then 1d every 60s. Revisions are preserved rather than overwriting old observations. Availability is provider-dependent. |
-| Yahoo daily reference | Entire 3-month daily chart response including available dividends and splits | Initially and hourly; raw OHLC are not silently replaced by adjusted close. |
-| Optional Alpaca | Native entitled-feed trades/quotes/bars/updatedBars/dailyBars, automatic corrections and cancel/error messages, SIP status/LULD where entitled; raw snapshots | Requires credentials. Default IEX means IEX-only, **not full US market**. SIP requires entitlement; delayed_sip is separate. No credentials means this stream is not running. |
+| Polymarket market WS | Every observed native text/binary frame, both outcome tokens: books, price/size changes, best bid/ask, last-trade, tick-size, new-market/resolution messages and unknown fields | Native observed messages; no intentional sampling. Not a guarantee of every exchange event. |
+| Polymarket REST books | Full two-sided book responses including returned hashes | Every 60 seconds and resubscription/reconnection requests; not a repair for missing historical deltas. |
+| Gamma | Original listing/tag responses, versioned accepted market/event rules, dates, condition IDs, outcomes/token pairing, resolution sources, liquidity/volume and flags returned by the provider | Finance tags resolved dynamically; newest IDs first, 25-event cursor pages with overflow reduction; open scans every 300s, recent closed scans every sixth cycle. Default end-date window: prior 7 / next 8 days. |
+| Public trades | Original paginated Data API v2 trade responses; overlap intentionally retained | Windowed backfill with explicit completion/truncation. Legacy fallback for 404/405, bounded offset. Not labeled all-time complete. |
+| History / analytics | Original sampled price history, OI, resolution state, CLOB market details such as fee/tick/minimum-size/negative-risk fields when supplied | History requests 1d / 60-second buckets and follows cursors; never described as historical tick/L2 reconstruction. OI/resolution every 600s, details/history every 1800s. |
+| Yahoo WS | Original wrapper/base64/protobuf plus separate decoding of available price/time/currency/exchange/day-volume/high/low/change/open/previous-close/bid/ask/sizes/last-size and unknown fields | **Unofficial provider quote updates, not exchange executions or consolidated NBBO.** Delay is unknown unless the provider reports it. Missing fields stay missing. |
+| Yahoo intraday | Entire response with timestamps, OHLCV, metadata, pre/post trading periods, timezone, dividends/splits/adjustments when supplied | 1m; first 5d then 1d every 60s. Revisions are retained, not overwritten. A metadata-only HTTP 200 is explicitly marked `metadata_only_no_bars`. |
+| Yahoo daily reference | Entire 3mo daily chart including supplied corporate actions and adjusted close | Initial and hourly. Unadjusted OHLC and adjusted close remain separate. |
+| Optional Alpaca | Native entitled-feed trades, quotes, bars, updated/daily bars, corrections/cancels/errors, snapshots; SIP statuses/LULD where entitled | Credentials required. Default IEX is **IEX only**, not all US trading; SIP requires entitlement, delayed_sip is separate. Not running without credentials. |
 
-All requested finance observations use `family=equity_daily`. The broad discovery
-transport may naturally contain rejected/non-financial event metadata; it is not
-a BTC price feed and must never be treated as an accepted research universe.
-`catalog` records define the accepted universe. Only their two outcome tokens are
-subscribed to. Newly listed ticker-bearing daily events do not require editing a
-fixed stock list. Unmapped financial names are retained but flagged; unfamiliar
-title formats can still require a classifier update. `pagination_complete` means
-only that the requested listing was exhausted, not that parser coverage is proven.
+The accepted universe is defined by `catalog`, not every discovery response or
+provider-wide new-market notification. Broad discovery transport can contain
+rejected metadata; only accepted daily non-crypto outcome tokens are subscribed.
+New ticker-bearing events require no fixed stock-list update. Unfamiliar title
+formats can still need parser changes; unknown financial underlyings are flagged.
+`pagination_complete` describes the API scan/window, not proven parser coverage.
 
-## Identity and time alignment
+## Identity, settlement and point-in-time use
 
-Use the tuple `(family, market_id, condition_id, token_id)` plus catalog version.
-Ticker alone is not a market key: one stock can have several dates and strikes.
-Outcome labels and token IDs are correlated by their original array positions;
-YES is not assumed to be index zero. End dates are kept in UTC, while exact
-exchange trading dates, closing-price definitions, comparison periods, tie rules,
-holidays and corporate actions must be read from the preserved rules/metadata.
+Use `(family, market_id, condition_id, token_id)` and catalog version; ticker alone
+is not unique across dates/strikes. Original outcome array position determines
+token pairing; YES/UP is not assumed to be index zero. Opening-direction events
+are `daily_open_direction`, separate from `daily_direction` and `close_threshold`.
 
-NDX is mapped to the index reference, **not QQQ**. HSI is an index, not an equity.
-GC/SI fallback symbols are explicitly labeled continuous-futures proxies; they
-are not silently equated to a specific futures contract or spot settlement.
-A symbol explicitly linked in market rules takes precedence, with provenance.
-No underlying series is automatically declared the official settlement oracle.
-Indices may have no meaningful transaction volume; missing values are not zero.
+NDX/SPX/HSI/DAX/FTSE/Nikkei map to index references, not same-named ETFs. WTI crude
+maps to a labeled continuous-futures reference, not the W&T Offshore equity.
+Gold/silver spot events are explicitly labeled `continuous_futures_proxy_not_spot`
+when a futures series is used; it is NOT an exact contract or spot settlement.
+An explicit Yahoo symbol URL in market rules takes precedence with provenance.
+Daily FX pairs discovered in finance are retained as `foreign_exchange`; a quote
+reference is not an official central-bank fixing or equity transaction volume.
+No underlying is declared the official settlement oracle. Pyth rule references
+are retained in `oracle_reference_symbols`, while `oracle_prices_collected=false`:
+this module has no Pyth Pro credentials and does not substitute Yahoo for it.
 
-Every record contains a UTC receipt timestamp in nanoseconds, a monotonic clock,
-a run ID and local sequence. WS records also have a connection ID and sequence;
-these sequences are collector counters, not exchange sequence numbers. Native
-source timestamps and precision remain in the untouched payload. HTTP rows include
-request start time, status, params and a small safe response-header allowlist;
-request authorization headers and authentication messages are not archived.
+Keep endDate UTC and native rules. Session date, exchange calendar, timezone,
+comparison price, averaging window, tie rule and corporate actions must be
+interpreted from those rules; do not derive an exchange session from UTC date.
+Indices/FX can lack meaningful traded volume: missing is not zero.
 
-For later point-in-time research, require `received_at_ns <= decision_time` and
-respect each provider's source time/delay/bar completion. A historical response
-retrieved today was not necessarily knowable at its bar timestamp. Keep later
-bar revisions and trade corrections separate. Daily cumulative volume changes
-are not individual trades. Bid, ask, last price and midpoint are different data.
-Deduplicate overlapping trade pages downstream using stable provider identifiers
-where available; do not discard raw receipts or double-count maker/taker views.
+Every envelope has receipt UTC nanoseconds, monotonic time, run ID and local
+sequence. WS also has connection ID/sequence (collector counters, not exchange
+sequence numbers). Native timestamps/precision remain in untouched payloads.
+HTTP records include request start, status, params and safe response headers,
+never request credentials or outbound authentication frames. Reconnects, errors,
+missing tokens, per-symbol availability, partial pages and run boundaries are
+recorded in audit/health/manifest. Sequence does not establish gap-free delivery.
 
-## Storage and recovery
+For future backtests require `received_at_ns <= decision_time` and respect source
+time, delay and bar completion. A historical response received today need not
+have been knowable at its bar timestamp. Keep corrections/revisions separate.
+Cumulative daily-volume changes are not individual trades. Bid, ask, last and
+midpoint are different observations. Deduplicate overlapping REST trades using
+provider identifiers downstream; retain originals and avoid maker/taker doubles.
 
-Code/tests/docs live under `equity_daily/`. Workflow:
-`.github/workflows/equity-daily.yml`. Concurrency group:
-`equity-daily-raw-production`. Default output: `equity_daily_output/`.
-The collector refuses a non-equity-named or nonempty output directory.
+## GitHub storage and running
 
-Release namespace: `equity-daily-v1-<run_id>-<run_attempt>`.
-No raw data is committed to code history. Gzip JSONL segments are closed at
-checkpoints / ~32 MiB uncompressed / UTC day changes. Each segment has a SHA256
-sidecar, a source name and receipt-time boundaries in the manifest. Underlying
-segments can additionally be encrypted. A rolling bundle is a tar containing
-closed segments, sidecars and immutable manifest snapshots; bundles are capped
-around 128 MiB of member data. Each bundle gets its own SHA256. Bundling limits
-GitHub asset-count growth. Partial files are excluded. Publication retries use
-the same immutable bytes, verify asset sizes and GitHub digests when supplied,
-and retain local recovery copies. Manifests include per-token/symbol coverage,
-HTTP statuses, disconnects, missing streams and provider limitations.
+Package: `equity_daily/`; workflow: `.github/workflows/equity-daily.yml`;
+concurrency: `equity-daily-raw-production`; family: `equity_daily`;
+output: `equity_daily_output/`; Release: `equity-daily-v1-<run_id>-<attempt>`.
+Non-equity-named or nonempty output directories are refused.
 
-Scheduled captures run every four hours with a four-hour acquisition duration.
-A main-branch module change also starts a capture. One equity capture runs at a
-time; it does not share concurrency with BTC. GitHub scheduling, runner startup,
-queues, network failures and provider throttles can leave gaps. This is **not a
-zero-gap 24/7 market-data service**. For an independently supervised long-running
-host use `--seconds 0`. Raw tick history before deployment or during disconnections
-cannot be reconstructed by interpolating bars or polling history endpoints.
-No automatic alerts/agent task or live trading is created by this module.
+Raw WS/HTTP bytes are base64 encoded with per-payload SHA256 in append-only gzip
+JSONL. Segments close around 32 MiB uncompressed, on UTC day changes/checkpoints.
+Each has a SHA256 sidecar and receipt range in immutable cumulative manifests.
+Only closed segments referenced by a completed checksummed manifest enter tar
+bundles (~128 MiB), which have their own SHA256 sidecars. Partial files are never
+published. Release publication retries identical immutable bytes, confirms remote
+sizes/digests when available, and retains local recovery copies. No raw data is
+committed to the git code history. Later manifests can reference earlier bundles.
 
-Health/catalog/manifest artifacts have seven-day retention as convenience copies;
-Releases are the intended durable store. GitHub storage/service limits still
-apply; this is not a promise of unlimited archival capacity. Review growth and
-mirror immutable bundles to object storage when scale requires it.
-
-## Run and test
+Production runs 4h, scheduled every 4h, with first checkpoint at about 45s and
+rolling publication every 300s. Test/smoke and runner queues create gaps; GitHub
+Actions is **not zero-gap 24/7 market infrastructure**. All 47 deterministic tests
+and a 150s live read-only smoke must pass before production starts. Smoke requires
+at least one discovered market and PM market observation; it does not certify
+all underlyings. Smoke/recovery/health Actions artifacts expire after 7 days;
+Releases are the intended durable archive. GitHub limits still apply; review
+storage growth and mirror to object storage if needed, not unlimited retention.
 
 ```bash
 python -m pip install -r equity_daily/requirements.txt
 python -m unittest discover -s equity_daily/tests -p 'test_*.py' -v
-python -m equity_daily.collector --seconds 180 --output equity_daily_smoke
-# Production publishing (gh CLI authenticated; GH_REPO=yt-feng/poly):
+python -m equity_daily.collector --seconds 180 --output equity_daily_local
+# gh CLI authenticated; GH_REPO=yt-feng/poly
 python -m equity_daily.collector --seconds 14400 --output equity_daily_run_001 \
   --checkpoint-seconds 300 --release equity-daily-v1-manual-001
+# --seconds 0 supports a separately supervised long-running host.
 ```
 
-Decode a verified, unencrypted raw segment:
+Verify bundle sidecars before safe tar extraction (e.g. Python extractall with
+`filter='data'` on a supporting version), then verify member hashes. Decode:
 
 ```python
 import base64, gzip, hashlib, json
 with gzip.open('equity_daily-polymarket_ws-....jsonl.gz', 'rt') as f:
     for line in f:
-        envelope = json.loads(line)
-        raw = base64.b64decode(envelope['payload_b64'])
-        assert hashlib.sha256(raw).hexdigest() == envelope['payload_sha256']
-        # raw is the original UTF-8 WebSocket text or binary/HTTP entity bytes.
+        row = json.loads(line)
+        raw = base64.b64decode(row['payload_b64'])
+        assert hashlib.sha256(raw).hexdigest() == row['payload_sha256']
 ```
-
-Before extracting a bundle, verify its sidecar. Use safe tar extraction (for
-example Python `tarfile.extractall(filter='data')` on a supporting version), then
-verify segment SHA256 against the manifest. Retrieve earlier bundles too when a
-later cumulative manifest references files from earlier checkpoints.
 
 ## Optional credentials and publication rights
 
-No API key is required for the default Polymarket/Yahoo paths. Yahoo is unofficial
-and may reject cloud IPs or delay/throttle/stop a feed. A stream request is not
-proof of receipt; inspect `health.json`. The Yahoo transport/protobuf implementation
-is based on the published yfinance protocol described in the references below.
+Default Polymarket/Yahoo paths need no API key. Yahoo is unofficial and can reject
+cloud IPs, throttle, delay or stop feeds. Requests are not evidence of receipt:
+inspect health. The repository and Releases are public; default source data is
+plaintext unless `EQUITY_ARCHIVE_KEY` is configured. Public accessibility is not
+a redistribution license: confirm source collection/use/storage/publication rights.
 
-Repository secrets (only this workflow uses these names):
-`EQUITY_ALPACA_KEY_ID`, `EQUITY_ALPACA_SECRET_KEY`, and optional
-`EQUITY_ARCHIVE_KEY` (a generated Fernet key, not a short PIN).
-Variables: `EQUITY_ALPACA_FEED` (`iex`, `sip`, `delayed_sip`) and optional
-`EQUITY_ALPACA_SYMBOLS` (comma-separated explicit subset). Keep a private backup
-of the encryption key; do not commit it. To generate one locally:
+Secrets used only by this workflow: `EQUITY_ALPACA_KEY_ID`,
+`EQUITY_ALPACA_SECRET_KEY`, optional `EQUITY_ARCHIVE_KEY` (generated Fernet key,
+not a short PIN). Variables: `EQUITY_ALPACA_FEED=iex|sip|delayed_sip`, optional
+`EQUITY_ALPACA_SYMBOLS` comma-separated subset. Licensed-feed publication is
+blocked without encryption, unless the operator explicitly asserts rights via
+`EQUITY_ALPACA_PUBLIC_REDISTRIBUTION=true`. Encryption grants no data license.
+With an archive key, all `underlying_*` segments are encrypted before bundling;
+Polymarket/audit/non-price health remain readable. Back up the key privately.
 
 ```bash
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-The repository and its Releases are public. Without `EQUITY_ARCHIVE_KEY`, default
-public-source data bundles are plaintext. Confirm provider terms and your rights
-to collect/store/redistribute each source; public accessibility is not a data
-redistribution license. Set the encryption secret before enabling a licensed feed.
-The Alpaca publisher is blocked without encryption unless the operator explicitly
-sets `EQUITY_ALPACA_PUBLIC_REDISTRIBUTION=true` after confirming redistribution
-rights. Encryption does not itself grant collection/use rights. With encryption,
-all `underlying_*` segments are encrypted before entering published bundles;
-Polymarket, audit and non-price health metadata remain readable. Secrets are not
-included in workflow logs, manifests or archive authentication records.
+## Verified trial and known limits
 
-## Primary references checked for this implementation
+The 150s PR smoke at `7e4bddb66205df970c7711e4ba2f323b1cec89d9` passed. Downloaded
+artifact `11226138735` (run `37007622709`) contains 706 accepted recent markets,
+202 unclosed markets, 404/404 outcome tokens with observations, 84,780 PM WS frames
+(including control frames), 507 Yahoo quote messages, 808 REST books, and 58
+successful chart responses. Nineteen Yahoo symbols produced quote messages; some
+chart responses had metadata but no prices. These are trial counts, not complete
+session coverage. No Alpaca credentials were configured. Trial underlying mapping
+errors (WTI/DAX and some indices/metals) were corrected in the next commit before
+production: do not treat the earlier trial mappings as validated research data.
 
-- Polymarket discovery: https://docs.polymarket.com/market-data/discover-markets
-- Market identity/rules/outcome pairing: https://docs.polymarket.com/market-data/market-details
-- WS frames/heartbeats: https://docs.polymarket.com/market-data/realtime-data
-- Books and history: https://docs.polymarket.com/market-data/prices-order-books
-- Trades/OI/resolution: https://docs.polymarket.com/market-data/public-analytics
-- Yahoo transport: https://github.com/ranaroussi/yfinance/blob/main/yfinance/live.py
-- Yahoo wire schema: https://github.com/ranaroussi/yfinance/blob/main/yfinance/pricing.proto
-- Alpaca stock data: https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data
-- GitHub Releases: https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases
+Pre-deployment and disconnected tick history cannot be recovered by interpolation.
+Finite REST backfills are not all-time complete. Optional licensed/SIP and exact
+oracle feeds remain unavailable until the relevant credentials/rights exist.
+Tests passing alone do not prove live feeds or Release publication.
 
-Tests are offline protocol/storage/classification checks. Passing them alone is
-not a claim that any live feed connected or a GitHub archive was published.
+## Primary implementation references
 
-### Live smoke gate
-
-Each PR and scheduled/push run first performs a 150-second public, read-only network smoke test after the 33 deterministic tests. Its health and raw recovery files are retained as a 7-day Actions artifact. The production capture starts only after at least one matching market and a Polymarket market-channel observation are verified. This gate does not certify Yahoo availability, quote completeness, or a full day of capture: inspect the printed per-source coverage. No Alpaca credentials or archive publication token are supplied to the smoke job.
+- https://docs.polymarket.com/market-data/discover-markets
+- https://docs.polymarket.com/api-reference/events/list-events-keyset-pagination
+- https://docs.polymarket.com/market-data/market-details
+- https://docs.polymarket.com/market-data/realtime-data
+- https://docs.polymarket.com/market-data/prices-order-books
+- https://docs.polymarket.com/api-reference/markets/get-a-tokens-price-history
+- https://docs.polymarket.com/market-data/public-analytics
+- https://github.com/ranaroussi/yfinance/blob/main/yfinance/live.py
+- https://github.com/ranaroussi/yfinance/blob/main/yfinance/pricing.proto
+- https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data
+- https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases
+- https://finance.yahoo.com/quote/%5EGDAXI/
+- https://finance.yahoo.com/quote/%5EN225/
+- https://finance.yahoo.com/quote/%5EFTSE/
+- https://finance.yahoo.com/quote/DX-Y.NYB/
+- https://finance.yahoo.com/quote/WTI/
