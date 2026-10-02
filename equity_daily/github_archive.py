@@ -53,10 +53,29 @@ def bundle_ready(root: Path, max_bytes=128*1024*1024):
     state_path = root / '.bundled.json'
     state = json.loads(state_path.read_text()) if state_path.exists() else {'files': [], 'bundles': []}
     known = set(state['files'])
-    ready = sorted(p for p in root.iterdir() if p.is_file() and not p.is_symlink()
-                   and p.name not in known
-                   and ('.jsonl.gz' in p.name or p.name.startswith('manifest-'))
-                   and not p.name.endswith(('.part', '.tmp')))
+    # A segment is publishable only after a fully written, checksummed manifest
+    # references it. A concurrent writer may have renamed a segment while its
+    # sidecar is still being written: directory globbing alone is not a commit.
+    ready_set = set()
+    for manifest in sorted(root.glob('manifest-*.json')):
+        sidecar = Path(str(manifest)+'.sha256')
+        if not sidecar.exists() or sidecar.read_text().split()[:1] != [digest(manifest)]:
+            continue
+        snapshot = json.loads(manifest.read_text())
+        members = [(manifest.name, digest(manifest))]
+        members += [(f['file'], f['sha256']) for f in snapshot['files']]
+        for name, expected in members:
+            if name in known:
+                continue
+            if Path(name).name != name:
+                raise RuntimeError('unsafe_manifest_member_path')
+            path, checksum = root/name, root/(name+'.sha256')
+            if path.is_symlink() or checksum.is_symlink() or not path.is_file() or not checksum.is_file():
+                raise RuntimeError('committed_segment_missing')
+            if digest(path) != expected or checksum.read_text().split()[:1] != [expected]:
+                raise RuntimeError('committed_segment_checksum_mismatch')
+            ready_set.update((path, checksum))
+    ready = sorted(ready_set)
     groups, group, size = [], [], 0
     for path in ready:
         if group and size + path.stat().st_size > max_bytes:

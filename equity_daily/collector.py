@@ -15,6 +15,7 @@ import zlib
 import aiohttp
 from .core import Journal, atomic_json, classify, epoch
 from .transport import PublicHTTP, stream
+from .discovery import DiscoveryMixin
 
 GAMMA = 'https://gamma-api.polymarket.com'
 CLOB = 'https://clob.polymarket.com'
@@ -40,7 +41,7 @@ def cursor_of(value):
     return value.get('next_cursor') or (value.get('pagination') or {}).get('next_cursor')
 
 
-class Collector:
+class Collector(DiscoveryMixin):
     def __init__(self, journal, args):
         self.journal, self.args = journal, args
         self.stats, self.catalog, self.versions = Counter(), {}, {}
@@ -113,72 +114,6 @@ class Collector:
         if self.versions.get(key) != version:
             self.versions[key] = version
             self.journal.emit('catalog', {'catalog_version': version, 'record': r})
-
-    async def discover(self, closed=False):
-        # Broad date-bounded scan, not a hard-coded stock list or popularity ranking.
-        params = dict(limit=500, closed=str(closed).lower(),
-                      end_date_min=time.strftime('%Y-%m-%dT00:00:00Z', time.gmtime(time.time()-self.args.lookback_days*86400)),
-                      end_date_max=time.strftime('%Y-%m-%dT23:59:59Z', time.gmtime(time.time()+self.args.lookahead_days*86400)))
-        mode, seen, rows_total, complete = 'keyset', set(), 0, False
-        label = 'closed_recent' if closed else 'open'
-        for number in range(self.args.max_pages):
-            url = GAMMA + ('/events/keyset' if mode == 'keyset' else '/events')
-            status, value = await self.http.get('discovery_http', url, params, context={'scan': label, 'page': number})
-            if number == 0 and status in (400, 404, 405, 422):
-                mode = 'offset'
-                params.pop('after_cursor', None)
-                params.update(offset=0, order='id', ascending='false')
-                status, value = await self.http.get('discovery_http', GAMMA+'/events', params, context={'scan': label, 'fallback': True})
-            if status != 200:
-                break
-            rows = page_rows(value, 'events')
-            if not isinstance(value, (dict, list)):
-                self.stats['discovery_invalid_response_shape'] += 1
-                break
-            rows_total += len(rows)
-            for event in rows:
-                if not isinstance(event, dict):
-                    continue
-                for market in event.get('markets') or []:
-                    if isinstance(market, dict):
-                        self.accept(market, event)
-            cursor = cursor_of(value)
-            if cursor:
-                if cursor in seen:
-                    self.stats['discovery_repeated_cursor'] += 1
-                    break
-                seen.add(cursor)
-                params['after_cursor'] = cursor
-            elif mode == 'offset' and len(rows) == params['limit']:
-                params['offset'] += len(rows)
-            elif isinstance(value, dict) and (value.get('pagination') or {}).get('has_more'):
-                self.stats['discovery_missing_cursor'] += 1
-                break
-            else:
-                complete = True
-                break
-        self.discovery[label] = dict(completed_at_ns=time.time_ns(), pagination_complete=complete,
-                                    pages=number+1, events_returned=rows_total, mode=mode,
-                                    scope='API date-bounded scan; parser coverage is not guaranteed')
-        self.journal.emit('audit', {'event': 'discovery_scan', **self.discovery[label], 'scan': label})
-        atomic_json(self.journal.root/'catalog.json', {'family': 'equity_daily', 'records': list(self.catalog.values())})
-
-    async def discovery_loop(self):
-        turn = 0
-        while True:
-            await self.discover(False)
-            # Reacquire recently closed events across runner restarts for results and backfills.
-            if turn % 6 == 0:
-                await self.discover(True)
-            # Follow pending known markets even when a provider's listing omits them.
-            known = list(self.catalog.values())
-            for r in known:
-                if (epoch(r['end_date_utc']) or 0) < time.time() and not r['closed']:
-                    status, m = await self.http.get('metadata_http', GAMMA+'/markets/'+quote(r['market_id'], safe=''))
-                    if status == 200 and isinstance(m, dict):
-                        self.accept(m, r['raw_event'])
-            turn += 1
-            await asyncio.sleep(self.args.discovery_seconds)
 
     async def books_loop(self):
         while True:

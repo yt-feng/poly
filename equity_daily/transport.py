@@ -99,7 +99,11 @@ class PublicHTTP:
                         chunks.append(chunk)
                         size += len(chunk)
                         if size > 32*1024*1024:
-                            raise ValueError('http_entity_exceeds_32MiB')
+                            self.stats['http_entity_size_limit'] += 1
+                            self.journal.emit('audit', dict(event='http_entity_size_limit', source=source,
+                                url=url, status=response.status, params=dict(params or {}),
+                                bytes_received=size, payload_complete=False, limit_bytes=32*1024*1024))
+                            return 599, None
                     body = b''.join(chunks)
                     self.journal.wire(source, body, transport='http', url=url, params=params or {},
                                       status=response.status, request_started_ns=started,
