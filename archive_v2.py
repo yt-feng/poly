@@ -15,6 +15,7 @@ import subprocess
 import time
 import threading
 from datetime import datetime, timezone
+from release_inventory_v2 import is_release_inventory_read
 
 
 def sha256(path: Path) -> str:
@@ -51,6 +52,8 @@ def safe_diagnostic(value, limit=2000) -> str:
 def _safe_read(args) -> bool:
     # Deliberate allowlist: gh api fields/input imply POST, and unknown flags or
     # commands must not accidentally make a remote mutation replayable.
+    if is_release_inventory_read(args):
+        return True
     if len(args) >= 2 and args[0] == 'api' and re.match(r'^repos/[^/]+/[^/]+/', args[1]):
         return args[2:] in ((), ('--method', 'GET'), ('-X', 'GET'))
     if len(args) >= 3 and args[:2] == ('release', 'view') and not args[2].startswith('-'):

@@ -99,12 +99,15 @@ class RebuildTests(unittest.TestCase):
             root=Path(d)/'output'
             if stale:root.mkdir();(root/'old').write_text('x')
             name='snapshots-'+DAY+'-000001.jsonl.gz';data=gzip.compress((json.dumps(row())+'\n').encode());digest=hashlib.sha256(data).hexdigest()
-            rel=dict(id=11,tag_name='capture-v2-11-1',created_at='2025-12-30T00:00:00Z',assets=[])
+            rel=dict(databaseId=11,tagName='capture-v2-11-1',createdAt='2025-12-31T00:00:00Z',
+                     publishedAt='2025-12-31T00:01:00Z',isDraft=False)
+            metadata=dict(data=dict(repository=dict(nameWithOwner='o/r',releases=dict(
+                nodes=[rel],pageInfo=dict(hasNextPage=False,endCursor='last')))))
             inv=[dict(id=12,name=name,size=len(data),digest='sha256:'+digest),dict(id=13,name=name+'.sha256',size=70)]
             calls=[]
             def fake(*a,**kw):
                 calls.append(a)
-                if a[0]=='api':return json.dumps(inv if '/assets?' in a[1] else [rel])
+                if a[0]=='api':return json.dumps(inv if '/assets?' in a[1] else metadata)
                 target=Path(a[a.index('--dir')+1]);fn=a[a.index('--pattern')+1]
                 (target/fn).write_bytes(data if fn==name else ((('0'*64 if bad_sha else digest)+'  '+name+'\n').encode()));return ''
             with patch('daily_quality_v2.gh',side_effect=fake),patch.dict('os.environ',{'GH_REPO':'o/r'}):

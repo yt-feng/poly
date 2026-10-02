@@ -160,7 +160,8 @@ class RebuildRecoveryTests(unittest.TestCase):
         row = dict(asset='btc', sample_ms=1767225600000, poly_valid=True, binance_valid=True)
         self.data = gzip.compress((json.dumps(row) + '\n').encode())
         self.digest = hashlib.sha256(self.data).hexdigest()
-        self.release = dict(id=11, tag_name='capture-v2-11-1', created_at='2025-12-30T00:00:00Z')
+        self.release = dict(databaseId=11, tagName='capture-v2-11-1', createdAt='2025-12-31T00:00:00Z',
+                            publishedAt='2025-12-31T00:01:00Z', isDraft=False)
         self.inventory = [dict(id=12, name=self.name, size=len(self.data), digest='sha256:' + self.digest),
                           dict(id=13, name=self.name + '.sha256', size=100)]
         self.env = patch.dict(os.environ, {'GH_REPO': 'o/r', 'GITHUB_RUN_ID': '36857540140',
@@ -174,7 +175,9 @@ class RebuildRecoveryTests(unittest.TestCase):
     def cli(self, cmd, **kwargs):
         args = cmd[1:]
         if args[0] == 'api':
-            return ok(json.dumps(self.inventory if '/assets?' in args[1] else [self.release]))
+            metadata=dict(data=dict(repository=dict(nameWithOwner='o/r',releases=dict(
+                nodes=[self.release],pageInfo=dict(hasNextPage=False,endCursor='last')))))
+            return ok(json.dumps(self.inventory if '/assets?' in args[1] else metadata))
         if args[:2] == ['release', 'download']:
             target = Path(args[args.index('--dir') + 1])
             name = args[args.index('--pattern') + 1]
@@ -206,7 +209,11 @@ class RebuildRecoveryTests(unittest.TestCase):
         self.assertEqual(error['stderr'], 'synthetic CLI error')
         self.assertEqual(run.call_count, 1)
         publish.assert_not_called()
-        self.assertEqual(json.loads((self.root/'failure.json').read_text())['context'], dict(page='1', endpoint=ENDPOINT))
+        context=json.loads((self.root/'failure.json').read_text())['context']
+        self.assertEqual(context['page'],'1')
+        self.assertEqual(context['endpoint'],'graphql')
+        self.assertEqual(context['operation'],'CaptureReleaseInventory')
+        self.assertEqual(context['cutoff_field'],'GraphQL Release.createdAt')
 
     def test_timeout_artifact_is_not_fabricated_coverage(self):
         with patch('archive_v2.subprocess.run', side_effect=subprocess.TimeoutExpired('gh', 30)):
@@ -222,7 +229,9 @@ class RebuildRecoveryTests(unittest.TestCase):
         self.assertEqual(self.failure('release_inventory')['error']['type'], 'JSONDecodeError')
 
     def test_release_pagination_nonadvance_and_malformed_pages_fail(self):
-        for response in [{}, [dict(id=True)], [self.release] * 101, [dict(self.release, created_at='2026-01-01T00:00:00Z')]]:
+        repeated=dict(data=dict(repository=dict(nameWithOwner='o/r',releases=dict(
+            nodes=[self.release],pageInfo=dict(hasNextPage=True,endCursor='same')))))
+        for response in [{}, [dict(id=True)], [self.release] * 101, repeated]:
             with self.subTest(response=str(response)[:100]), tempfile.TemporaryDirectory() as d:
                 self.root = Path(d)/'out'; self.args.output = self.root
                 with patch('archive_v2.subprocess.run', return_value=ok(json.dumps(response))):

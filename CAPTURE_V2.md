@@ -136,6 +136,31 @@ A partial deployment day is expected to show partial coverage. Chainlink validit
 is separately visible; core coverage does not establish Chainlink completeness.
 The report audits sampled snapshots, not every exchange event or every sequence.
 
+Release discovery uses a fixed read-only GraphQL query with 20 metadata-only
+nodes per page. It does not use the REST release list, which embeds every
+release's assets and can time out before any quality calculation. Repository
+identity, complete response shape, creation-time order, distinct identities and
+cursor progress are validated before selected releases are used. Partial
+GraphQL data or hitting the pagination cap fails the rebuild with `failure.json`;
+it does not become a successful report with invented coverage.
+
+The lower discovery bound remains the selected UTC date minus one day, for the
+four-hour capture runs. It now explicitly uses **GraphQL `Release.createdAt`**,
+the release object's creation time, rather than REST `created_at`, the tagged
+commit's timestamp. The entire first page strictly older than the bound is
+included; equal-time boundary entries continue onto subsequent pages. This is a
+bounded release window, not full-history completeness. `release_discovery`
+records the time field, cutoff, pages and stop reason. Once a capture release is
+selected, its assets still use the complete independent REST asset pagination,
+followed by the unchanged SHA-256, API digest, byte-size and distinct-second
+checks. The 86,400-second denominator and 95% gates are unchanged.
+
+Only the exact static inventory query and its validated string/null variables
+join the shared CLI's existing read retry allowlist. Explicit transient failures
+receive at most three retries of identical arguments. Unknown GraphQL operations,
+mutations and write commands remain single-attempt; partial/schema-invalid
+responses are not retried as though they were transport failures.
+
 The September 26 incident illustrates why a passing short smoke test is not
 enough: a four-hour sampler stopped, but task shutdown held the concurrency slot
 for another hour until the job timeout. Its final snapshot segment stayed open.
