@@ -72,6 +72,11 @@ class MarketWSGuard:
         self.rest = {}
         self.last_book = {}
         self.book_counts = {}
+        # Transport liveness and market-data liveness are deliberately tracked
+        # separately. PING/PONG can continue while the book stream is silent.
+        self.last_data_event_at = None
+        self.data_event_count = 0
+        self._last_subscription_signature = None
         self.pong_at = None
         self.last_reconnect = -float('inf')
         self.reconnects = 0
@@ -81,6 +86,9 @@ class MarketWSGuard:
         self.connection_id = connection_id
         self.subscribed.clear()
         self.last_book.clear()
+        self.last_data_event_at = None
+        self.data_event_count = 0
+        self._last_subscription_signature = None
         self.pong_at = None
 
     def subscriptions(self, tokens, now):
@@ -103,9 +111,49 @@ class MarketWSGuard:
         self.rest[token] = {'fingerprint': fp, 'time': now, 'changes': changes}
 
     def ws_book(self, payload, now):
-        for token in book_tokens(payload) & self.subscribed.keys():
+        tokens = book_tokens(payload)
+        if tokens:
+            self.last_data_event_at = now
+            self.data_event_count += 1
+        for token in tokens & self.subscribed.keys():
             self.last_book[token] = now
             self.book_counts[token] = self.book_counts.get(token, 0) + 1
+
+    def subscription_check(self, current_tokens, now, *, rest_max_age=5):
+        """Compare current/REST token IDs with the intended WS subscription.
+
+        A market rollover can leave a live REST book under a new token while a
+        socket still carries an old subscription. This is diagnostic state only;
+        it never infers a missing WS event or certifies completeness.
+        """
+        current = set(map(str, current_tokens))
+        subscribed = set(self.subscribed)
+        recent_rest = {token for token, item in self.rest.items()
+                       if 0 <= now-item['time'] <= rest_max_age}
+        missing = sorted((current | recent_rest) - subscribed)
+        rest_not_current = sorted(recent_rest - current) if current else []
+        return {
+            'current_tokens_known': bool(current),
+            'expected_current_tokens': sorted(current),
+            'recent_rest_tokens': sorted(recent_rest),
+            'subscribed_tokens': sorted(subscribed),
+            'missing_current_subscriptions': missing,
+            'rest_tokens_not_current': rest_not_current,
+            'subscription_matches_rest': bool(current) and not missing and not rest_not_current,
+        }
+
+    def subscription_notice(self, current_tokens, now):
+        check = self.subscription_check(current_tokens, now)
+        mismatch = (check['current_tokens_known'] and
+                    (check['missing_current_subscriptions'] or check['rest_tokens_not_current']))
+        if not mismatch:
+            self._last_subscription_signature = None
+            return None
+        signature = (tuple(check['missing_current_subscriptions']), tuple(check['rest_tokens_not_current']))
+        if signature == self._last_subscription_signature:
+            return None
+        self._last_subscription_signature = signature
+        return check
 
     def token_state(self, token, now):
         subscribed_at = self.subscribed.get(token)
@@ -142,8 +190,12 @@ class MarketWSGuard:
 
     def summary(self, current_tokens, now):
         states = {str(t): self.token_state(str(t), now) for t in current_tokens}
+        subscription = self.subscription_check(current_tokens, now)
         return {'connection_id': self.connection_id, 'current_tokens': states,
                 'pong_age_seconds': round(now-self.pong_at, 3) if self.pong_at is not None else None,
+                'data_event_age_seconds': round(now-self.last_data_event_at, 3) if self.last_data_event_at is not None else None,
+                'data_event_count': self.data_event_count,
+                'subscription_check': subscription,
                 'guard_reconnects': self.reconnects,
                 'all_current_tokens_fresh': bool(states) and all(x['fresh_book_evidence'] for x in states.values()),
                 'suspect_current_tokens': [t for t, x in states.items() if x['suspect_silence']],
@@ -192,6 +244,10 @@ async def market_socket(collector, url, handler):
                         if frames:
                             initialized = True
                             guard.subscriptions(wanted, now)
+                        mismatch = guard.subscription_notice(current_tokens(collector), now)
+                        if mismatch:
+                            collector.raw('polymarket_ws_subscription_mismatch', mismatch,
+                                          connection_id=connection_id)
                         if now-last_ping >= 10:
                             await ws.send_str('PING')
                             last_ping = now

@@ -174,8 +174,20 @@ four-hour run, its durable final segment, the next run, and a subsequent full UT
 day passing the unchanged 95% gate.
 
 `health.json` also exposes per-source/per-asset last-valid timestamps, errors,
-connection status, and raw message counts. GitHub workflow success alone must not
-be treated as proof of complete data. Monitor freshness and report coverage.
+connection status, raw message counts, and source-specific `data_event_age_seconds`
+timestamps. For the Polymarket market socket, `poly_ws_health` reports
+`data_event_age_seconds` separately from `pong_age_seconds`, per-token book ages,
+and a current-token/REST-token subscription check. PING/PONG therefore cannot
+make a silent book stream look fresh. `pre_shutdown_live_health` preserves these
+diagnostics before connection cleanup for the shutdown-health path tracked by
+PR #6.
+
+The offline fixture
+`tests/fixtures/market_ws_rest_gap_293s.json` models the observed 293-second
+pattern of changing REST books with zero WS book rows. Its regression test must
+remain a data-integrity failure signal; it does not prove that live event tape
+delivery is fixed. GitHub workflow success alone must not be treated as proof of
+complete data. Monitor freshness and report coverage.
 
 ## Official protocol references
 

@@ -48,6 +48,8 @@ class CollectorV3(Collector):
     def raw(self,source,payload,*,connection_id=None,event_ms=None):
         self.counts[source] += 1
         ns,mono = time.time_ns(),time.monotonic_ns()
+        if source in {'polymarket_ws', 'polymarket_rest_book', 'binance_spot_ws', 'chainlink_rtds'}:
+            self.last_data_event_ms[source] = ns//1000000
         self.archive.write('raw',dict(schema_version=3,source=source,received_at_ns=ns,
              received_monotonic_ns=mono,source_event_ms=event_ms,connection_id=connection_id,payload=payload))
         try:

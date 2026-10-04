@@ -282,6 +282,13 @@ fills, fees, settlement, or canary eligibility. In particular, the open
 capture API/window work remains a separate live-behavior verification item;
 green CI must not be described as live validation.
 
+For WS diagnostics, `health.json` separates source-specific data-event age from
+PING/PONG age and records current-token versus recent REST-token subscription
+checks. The offline 293-second fixture under
+`tests/fixtures/market_ws_rest_gap_293s.json` covers changing REST books with
+zero WS book rows; passing that regression only preserves the failure signal and
+does not establish live tape delivery.
+
 ## Window mapping logic
 
 This repo uses the convention:

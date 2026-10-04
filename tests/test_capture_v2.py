@@ -179,6 +179,16 @@ class FeedIsolationTests(unittest.TestCase):
             self.assertIsNone(c.tickers['btc']['event_ms'])
             c.archive.close()
 
+    def test_health_tracks_data_event_age_separately_from_transport_controls(self):
+        with tempfile.TemporaryDirectory() as d:
+            c = Collector(['btc'], Path(d))
+            c.raw('polymarket_ws', {'event_type': 'book', 'asset_id': 'a'})
+            health = c.health()
+            self.assertIn('polymarket_ws', health['last_data_event_ms'])
+            self.assertGreaterEqual(health['data_event_age_seconds']['polymarket_ws'], 0)
+            self.assertNotIn('pong', health['data_event_age_seconds'])
+            c.archive.close()
+
     def test_depth_gap_is_recorded(self):
         with tempfile.TemporaryDirectory() as d:
             c = Collector(['btc'], Path(d))

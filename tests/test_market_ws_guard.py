@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,53 @@ class GuardTests(unittest.TestCase):
         self.changed();self.g.pong_at=125
         self.g.ws_book({'event_type':'PONG'},125)
         self.assertIsNotNone(self.g.request_reconnect({'a'},125))
+
+    def test_data_event_age_is_separate_from_pong_age(self):
+        self.g.pong_at = 125
+        before = self.g.summary({'a'}, 125)
+        self.assertIsNone(before['data_event_age_seconds'])
+        self.assertEqual(before['pong_age_seconds'], 0)
+        self.g.ws_book({'event_type':'book','asset_id':'a'}, 130)
+        after = self.g.summary({'a'}, 135)
+        self.assertEqual(after['data_event_age_seconds'], 5)
+        self.assertEqual(after['pong_age_seconds'], 10)
+        self.assertEqual(after['data_event_count'], 1)
+
+    def test_subscription_check_tracks_current_rest_ids(self):
+        self.g.rest_book(book('a', stamp='old'), 100)
+        self.assertTrue(self.g.subscription_check({'a'}, 100)['subscription_matches_rest'])
+        self.g.subscriptions({'b'}, 200)
+        self.g.rest_book(book('b', stamp='new'), 200)
+        check = self.g.subscription_check({'b'}, 200)
+        self.assertEqual(check['expected_current_tokens'], ['b'])
+        self.assertEqual(check['rest_tokens_not_current'], [])
+        self.assertTrue(check['subscription_matches_rest'])
+
+    def test_subscription_mismatch_is_bounded_diagnostic(self):
+        self.g.rest_book(book('a', stamp='old'), 100)
+        self.g.subscriptions({'b'}, 100)
+        notice = self.g.subscription_notice({'b'}, 100)
+        self.assertEqual(notice['missing_current_subscriptions'], ['a'])
+        self.assertEqual(notice['rest_tokens_not_current'], ['a'])
+        self.assertFalse(notice['subscription_matches_rest'])
+        self.assertIsNone(self.g.subscription_notice({'b'}, 100))
+
+    def test_293s_archive_pattern_is_suspect_without_ws_rows(self):
+        fixture = json.loads((Path(__file__).parent/'fixtures'/'market_ws_rest_gap_293s.json').read_text())
+        guard = MarketWSGuard(silence_seconds=20, min_rest_changes=3)
+        guard.connect('fixture-293s')
+        guard.subscriptions(fixture['current_tokens'], 0)
+        for event in fixture['rest_events']:
+            guard.rest_book(book(event['token'], event['size'], str(event['at'])), event['at'])
+        summary = guard.summary(fixture['current_tokens'], fixture['duration_seconds'])
+        self.assertEqual(summary['data_event_count'], fixture['expected']['ws_book_event_count'])
+        self.assertIsNone(summary['data_event_age_seconds'])
+        self.assertTrue(all(summary['current_tokens'][token]['suspect_silence']
+                            for token in fixture['expected']['suspect_current_tokens']))
+        self.assertEqual(summary['subscription_check']['recent_rest_tokens'], ['down', 'up'])
+        self.assertTrue(summary['subscription_check']['subscription_matches_rest'])
+        self.assertTrue(all(summary['current_tokens'][token]['rest_changes_since_last_ws_book'] ==
+                            fixture['expected']['rest_changes_per_token'] for token in fixture['current_tokens']))
     def test_quiet_market_not_reconnected(self):
         for t in range(100,130):self.g.rest_book(book(stamp=str(t)),t)
         self.assertIsNone(self.g.request_reconnect({'a'},129))
@@ -88,6 +136,18 @@ class GuardTests(unittest.TestCase):
             c.raw('polymarket_rest_book',book());c.raw('polymarket_ws',{'event_type':'book','asset_id':'a'})
             self.assertIn('a',c.ws_guard.last_book)
             self.assertIn('a',c.ws_guard.rest);c.archive.close()
+
+    def test_pre_shutdown_health_preserves_ws_data_diagnostics(self):
+        with tempfile.TemporaryDirectory() as d:
+            c = CollectorV3(['btc'], Path(d))
+            c.ws_guard.connect('x')
+            c.ws_guard.subscriptions({'a'}, 100)
+            c.raw('polymarket_ws', {'event_type': 'book', 'asset_id': 'a'})
+            c.pre_shutdown_live_health = c.health()
+            final = c.health()
+            self.assertIn('poly_ws_health', final['pre_shutdown_live_health'])
+            self.assertIn('data_event_age_seconds', final['pre_shutdown_live_health']['poly_ws_health'])
+            c.archive.close()
 
 
 class SocketCancellation(unittest.IsolatedAsyncioTestCase):

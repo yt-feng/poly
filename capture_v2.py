@@ -27,6 +27,7 @@ POLY_WS = 'wss://ws-subscriptions-clob.polymarket.com/ws/market'
 GAMMA = 'https://gamma-api.polymarket.com'
 CLOB = 'https://clob.polymarket.com'
 CHAINLINK_WS = 'wss://ws-live-data.polymarket.com'
+DATA_EVENT_SOURCES = {'polymarket_ws', 'polymarket_rest_book', 'binance_spot_ws', 'chainlink_rtds'}
 
 
 def epoch_ms(value):
@@ -103,6 +104,7 @@ class Collector:
         self.markets, self.books, self.prices, self.tickers = {}, {}, {}, {}
         self.connected, self.counts, self.valid = {}, Counter(), Counter()
         self.last_error, self.last_error_time, self.cooldown = {}, {}, {}
+        self.last_data_event_ms = {}
         self.latest_sample_ms = None
         self.last_valid_ms = {}
         self.started_ms = int(time.time()*1000)
@@ -113,6 +115,8 @@ class Collector:
 
     def raw(self, source: str, payload, *, connection_id=None, event_ms=None):
         self.counts[source] += 1
+        if source in DATA_EVENT_SOURCES:
+            self.last_data_event_ms[source] = int(time.time()*1000)
         self.archive.write('raw', dict(schema_version=2, source=source,
                            received_at_ns=time.time_ns(), source_event_ms=event_ms,
                            connection_id=connection_id, payload=payload))
@@ -343,10 +347,14 @@ class Collector:
             await asyncio.sleep(max(0, deadline-time.monotonic()))
 
     def health(self):
-        health = dict(schema_version=2, updated_ms=int(time.time()*1000), started_ms=self.started_ms,
+        now_ms = int(time.time()*1000)
+        health = dict(schema_version=2, updated_ms=now_ms, started_ms=self.started_ms,
                     latest_sample_ms=self.latest_sample_ms, assets=self.assets,
                     connected=self.connected.copy(), raw_counts=dict(self.counts),
                     valid_snapshot_counts=dict(self.valid), last_valid_ms=self.last_valid_ms.copy(),
+                    last_data_event_ms=self.last_data_event_ms.copy(),
+                    data_event_age_seconds={source: round(max(0, now_ms-stamp)/1000, 3)
+                                            for source, stamp in self.last_data_event_ms.items()},
                     last_errors=self.last_error.copy())
         if self.pre_shutdown_live_health is not None:
             health['pre_shutdown_live_health'] = self.pre_shutdown_live_health

@@ -1,0 +1,30 @@
+{
+  "fixture_version": 1,
+  "name": "rest-books-change-with-zero-ws-book-rows",
+  "duration_seconds": 293,
+  "current_tokens": ["up", "down"],
+  "rest_events": [
+    {"at": 0, "token": "up", "size": "1"},
+    {"at": 0, "token": "down", "size": "1"},
+    {"at": 59, "token": "up", "size": "2"},
+    {"at": 59, "token": "down", "size": "2"},
+    {"at": 118, "token": "up", "size": "3"},
+    {"at": 118, "token": "down", "size": "3"},
+    {"at": 177, "token": "up", "size": "4"},
+    {"at": 177, "token": "down", "size": "4"},
+    {"at": 236, "token": "up", "size": "5"},
+    {"at": 236, "token": "down", "size": "5"},
+    {"at": 250, "token": "up", "size": "5.5"},
+    {"at": 250, "token": "down", "size": "5.5"},
+    {"at": 270, "token": "up", "size": "5.75"},
+    {"at": 270, "token": "down", "size": "5.75"},
+    {"at": 293, "token": "up", "size": "6"},
+    {"at": 293, "token": "down", "size": "6"}
+  ],
+  "ws_book_events": [],
+  "expected": {
+    "ws_book_event_count": 0,
+    "rest_changes_per_token": 4,
+    "suspect_current_tokens": ["down", "up"]
+  }
+}
