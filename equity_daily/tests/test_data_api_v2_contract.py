@@ -136,7 +136,7 @@ class DataAPIV2ContractTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(obj.journal.events[-1][1]['pagination_complete'])
 
     async def test_history_empty_continuing_page_pins_window_and_token(self):
-        point = {'timestamp': NOW-10, 'price': None, 'resolution_seconds': 0}
+        point = {'timestamp': NOW-10, 'price': 0.5, 'resolution_seconds': 0}
         obj = self.collector([(200, page(cursor='history/+?=&')), (200, page([point]))])
         self.assertTrue(await obj.history('fixture-token'))
         expected = {'token_id': 'fixture-token', 'start': NOW-86400, 'end': NOW,
@@ -152,6 +152,23 @@ class DataAPIV2ContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await obj.history('fixture-token'))
         self.assertEqual(len(obj.http.calls), 1)
         self.assertEqual(obj.journal.events[-1][1]['points_returned'], 0)
+
+    async def test_malformed_history_numeric_fields_do_not_complete_or_count(self):
+        valid = {'timestamp': NOW-10, 'price': 0.5, 'resolution_seconds': 60}
+        invalid = [{}]
+        for key, values in {'timestamp': (None, True, str(NOW), NOW*1000, -1),
+                            'price': (None, True, '0.5', -0.01, 1.01, float('nan'), float('inf')),
+                            'resolution_seconds': (None, True, '60', -1, 0.5)}.items():
+            invalid.extend(dict(valid, **{key: value}) for value in values)
+        for point in invalid:
+            with self.subTest(point=point):
+                obj = self.collector([(200, page([point]))])
+                self.assertFalse(await obj.history('fixture-token'))
+                audit = obj.journal.events[-1][1]
+                self.assertFalse(audit['pagination_complete'])
+                self.assertEqual(audit['points_returned'], 0)
+                self.assertEqual(audit['reason'], 'invalid_history_point')
+                self.assertEqual(obj.stats['history_complete_windows'], 0)
 
     async def test_history_repeated_cursor_and_budget_are_incomplete(self):
         obj = self.collector([(200, page(cursor='same')), (200, page(cursor='same'))])

@@ -265,6 +265,14 @@ class Collector(DiscoveryMixin):
             except ValueError as exc:
                 reason = str(exc)
                 break
+            if any(type(row.get('timestamp')) is not int
+                   or not 0 <= row['timestamp'] < 100_000_000_000
+                   or type(row.get('price')) not in (int, float)
+                   or not 0 <= row['price'] <= 1
+                   or type(row.get('resolution_seconds')) is not int
+                   or row['resolution_seconds'] < 0 for row in rows):
+                reason = 'invalid_history_point'
+                break
             points += len(rows)
             if cursor is not None:
                 if cursor in seen:
