@@ -41,6 +41,23 @@ def cursor_of(value):
     return value.get('next_cursor') or (value.get('pagination') or {}).get('next_cursor')
 
 
+def data_api_page(value):
+    """Accept only the documented v2 envelope; empty pages may continue."""
+    if not isinstance(value, dict) or not isinstance(value.get('data'), list):
+        raise ValueError('invalid_data_api_envelope')
+    if not all(isinstance(row, dict) for row in value['data']):
+        raise ValueError('invalid_data_api_rows')
+    pagination = value.get('pagination')
+    if not isinstance(pagination, dict) or 'next_cursor' not in pagination:
+        raise ValueError('missing_data_api_cursor')
+    cursor = pagination['next_cursor']
+    if cursor is not None and (not isinstance(cursor, str) or not cursor):
+        raise ValueError('invalid_data_api_cursor')
+    if type(pagination.get('has_more')) is not bool or pagination['has_more'] != (cursor is not None):
+        raise ValueError('inconsistent_data_api_pagination')
+    return value['data'], cursor
+
+
 class Collector(DiscoveryMixin):
     def __init__(self, journal, args):
         self.journal, self.args = journal, args
@@ -175,69 +192,93 @@ class Collector(DiscoveryMixin):
             await asyncio.sleep(self.args.underlying_seconds)
 
     async def trades(self, r, start):
-        params = {'condition': r['condition_id'], 'start': start, 'end': int(time.time()), 'limit': 1000}
-        url, mode, seen = DATA+'/v2/trades', 'v2', set()
+        end = int(time.time())
+        # Condition feeds ignore start/end and cover three years. Filter locally;
+        # cursor exhaustion alone cannot prove a window older than that retention.
+        params = {'condition': r['condition_id'], 'limit': 1000}
+        seen, selected, pagination_complete, reason = set(), 0, False, 'page_limit'
         for number in range(100):
-            status, value = await self.http.get('trades_http', url, params,
-                context={'market_id': r['market_id'], 'pagination_page': number, 'deduplication': 'raw_overlap_intentional'})
-            if number == 0 and status in (404, 405):
-                url, mode = DATA+'/trades', 'legacy'
-                params = {'market': r['condition_id'], 'limit': 1000, 'offset': 0, 'takerOnly': 'true'}
-                status, value = await self.http.get('trades_http', url, params, context={'fallback': 'legacy_recent_only'})
-            if status != 200 or not isinstance(value, (list, dict)):
-                return False
-            rows = page_rows(value, 'trades')
-            cursor = cursor_of(value)
-            if cursor:
+            status, value = await self.http.get('trades_http', DATA+'/v2/trades', params,
+                context={'market_id': r['market_id'], 'pagination_page': number,
+                         'deduplication': 'raw_overlap_intentional',
+                         'client_window_start': start, 'client_window_end': end})
+            if status != 200:
+                reason = 'http_status_' + str(status)
+                break
+            try:
+                rows, cursor = data_api_page(value)
+            except ValueError as exc:
+                reason = str(exc)
+                break
+            window_rows = []
+            for row in rows:
+                timestamp = row.get('timestamp')
+                # REST timestamps are epoch seconds. Never turn unknown/malformed
+                # timestamps into zero or infer coverage from SDK millisecond fields.
+                if type(timestamp) is not int or not 0 <= timestamp < 100_000_000_000:
+                    reason = 'invalid_trade_timestamp'
+                    break
+                if start <= timestamp <= end:
+                    window_rows.append(row)
+            if reason == 'invalid_trade_timestamp':
+                break
+            if window_rows:
+                self.journal.emit('trade_window_rows', dict(market_id=r['market_id'],
+                    start=start, end=end, rows=window_rows, pagination_page=number))
+                selected += len(window_rows)
+            if cursor is not None:
                 if cursor in seen:
+                    reason = 'repeated_cursor'
                     break
                 seen.add(cursor)
                 params['cursor'] = cursor
-            elif mode == 'legacy' and len(rows) == 1000:
-                params['offset'] += 1000
-                if params['offset'] > 10000:
-                    break
-            elif isinstance(value, dict) and (value.get('pagination') or {}).get('has_more'):
-                break
             else:
-                self.journal.emit('audit', dict(event='trade_backfill_window', market_id=r['market_id'],
-                    start=start, end=params.get('end'), api_mode=mode, pagination_complete=True,
-                    all_time_complete=False, pages=number+1))
-                return True
-        self.journal.emit('audit', dict(event='trade_backfill_truncated', market_id=r['market_id'], pages=number+1))
-        self.stats['trade_backfill_truncated'] += 1
-        return False
+                pagination_complete, reason = True, 'cursor_exhausted'
+                break
+        # 1095 days is a conservative subset of a calendar three-year window.
+        retained_window = end-1095*86400 <= start <= end
+        complete = pagination_complete and retained_window
+        if pagination_complete and not retained_window:
+            reason = 'outside_documented_retention'
+        self.journal.emit('audit', dict(event='trade_backfill_window', market_id=r['market_id'],
+            start=start, end=end, api_mode='v2', pagination_complete=pagination_complete,
+            window_complete=complete, reason=reason, selected_rows=selected,
+            server_window='fixed_three_years', time_filter='client_inclusive',
+            all_time_complete=False, pages=number+1))
+        self.stats['trade_backfill_complete_windows' if complete else 'trade_backfill_truncated'] += 1
+        return complete
 
     async def history(self, token):
         # Windowed backfill is paginated, never confused with native WS ticks.
-        params = {'token_id': token, 'interval': '1d', 'bucket_seconds': 60}
-        seen, points, complete = set(), 0, False
+        end = int(time.time())
+        params = {'token_id': token, 'start': end-86400, 'end': end, 'bucket_seconds': 60}
+        seen, points, complete, reason = set(), 0, False, 'page_limit'
         for page in range(100):
             status, value = await self.http.get('history_http', DATA+'/v2/prices-history', params,
                 context={'requested_bucket_seconds': 60, 'reconstructs_orderbook': False,
                          'purpose': 'sampled_backfill_not_native_ticks', 'page': page})
-            if page == 0 and status in (404, 405):
-                status, value = await self.http.get('history_http', CLOB+'/prices-history',
-                    {'market': token, 'interval': 'max', 'fidelity': 1},
-                    context={'legacy_fidelity_minutes': 1, 'reconstructs_orderbook': False})
-                return status == 200 and isinstance(value, dict) and isinstance(value.get('history'), list)
-            if status != 200 or not isinstance(value, dict) or not isinstance(value.get('data'), list):
+            if status != 200:
+                reason = 'http_status_' + str(status)
                 break
-            points += len(value['data'])
-            cursor = cursor_of(value)
-            if cursor:
+            try:
+                rows, cursor = data_api_page(value)
+            except ValueError as exc:
+                reason = str(exc)
+                break
+            points += len(rows)
+            if cursor is not None:
                 if cursor in seen:
+                    reason = 'repeated_cursor'
                     break
                 seen.add(cursor)
                 params['cursor'] = cursor
-            elif (value.get('pagination') or {}).get('has_more'):
-                break
             else:
-                complete = True
+                complete, reason = True, 'cursor_exhausted'
                 break
         self.journal.emit('audit', dict(event='history_backfill_window', token_id=token,
             pagination_complete=complete, points_returned=points, pages=page+1,
-            requested_window='1d', requested_bucket_seconds=60, all_time_complete=False))
+            requested_window='1d', start=params['start'], end=end, reason=reason,
+            requested_bucket_seconds=60, all_time_complete=False))
         self.stats['history_complete_windows' if complete else 'history_incomplete_windows'] += 1
         return complete
 
