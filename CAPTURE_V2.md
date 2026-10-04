@@ -116,7 +116,7 @@ and a full Binance exchange-wide historical universe are not implemented.
 CLI examples (run from repository root):
 
 ```bash
-pip install -r requirements-v2.txt
+python -m pip install -r requirements-test.txt
 python capture_v2.py --assets btc --seconds 90 --output smoke --require-core
 python binance_backfill_v2.py --start 2026-04-21 --symbols BTCUSDT --publish
 # Optional historical futures scope; 1s futures klines are deliberately rejected.
@@ -124,6 +124,12 @@ python binance_backfill_v2.py --market futures/um --datasets trades,aggTrades,kl
 python quality_v2.py --root smoke --output smoke-report.json
 python -m unittest discover -s tests -p 'test_capture_v2.py' -v
 ```
+
+`requirements-test.txt` is the deterministic environment for the complete
+offline/unit suite. It includes the capture runtime dependencies from
+`requirements-v2.txt` (including `requests`) and the public archive tooling
+dependency set. A capture-only environment may install `requirements-v2.txt`
+instead.
 
 ## Daily quality and operational interpretation
 

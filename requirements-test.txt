@@ -1,0 +1,5 @@
+# Reproducible dependency set for the complete offline/unit test suite.
+# Runtime capture dependencies stay in requirements-v2.txt; archive tooling
+# dependencies stay in requirements-research.txt.
+-r requirements-v2.txt
+-r requirements-research.txt

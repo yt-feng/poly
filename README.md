@@ -254,6 +254,18 @@ python -m unittest tests.test_archive_crypto -v
 canary evaluation belong in `yt-feng/poly_trade`; `equity_daily` remains a
 separate data product and must not be mixed with BTC five-minute capture.
 
+For the complete offline/unit suite, install the checked-in test environment
+before running discovery. It includes `requests` and `aiohttp` through the
+capture requirements, plus the research archive dependency:
+
+```bash
+python -m pip install -r requirements-test.txt
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+Capture-only jobs may install `requirements-v2.txt`; the combined file is the
+reproducible choice whenever the full test tree is run.
+
 ## Private archive handling
 
 The public repository may contain ciphertext envelopes, never plaintext

@@ -44,10 +44,14 @@ Gamma 在进行中的五分钟窗口可能尚未返回 `eventMetadata.priceToBea
 运行与检查：
 
 ```bash
-pip install -r requirements-v2.txt
+python -m pip install -r requirements-test.txt
 python -m unittest discover -s tests -p 'test_*.py' -v
 python capture_v3.py --assets btc --seconds 120 --output smoke_v3 --require-core --require-microstructure
 ```
+
+`requirements-test.txt` includes the capture dependencies and research tooling
+dependencies so the full test command does not rely on whatever happens to be
+preinstalled in the interpreter.
 
 严格短测要求至少取得5条有效的规则、费用、匹配的结算参考价、spot20档及Coinbase数据；永续与汇率独立显示可用性，避免因额外源受限停止既有核心记录。合并前需查看真实短测产物，不以本地单测替代网络验证。
 

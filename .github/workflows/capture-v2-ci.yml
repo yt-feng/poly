@@ -1,10 +1,10 @@
 name: capture-v2-ci
 on:
   pull_request:
-    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', 'capture_continuity_probe.py', '.github/workflows/capture-continuity-probe.yml', '.github/workflows/*v2*.yml']
+    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'requirements-test.txt', 'tests/*.py', 'capture_continuity_probe.py', '.github/workflows/capture-continuity-probe.yml', '.github/workflows/*v2*.yml']
   push:
     branches: [main, 'improve/**']
-    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'tests/*.py', 'capture_continuity_probe.py', '.github/workflows/capture-continuity-probe.yml', '.github/workflows/*v2*.yml']
+    paths: ['*v2.py', '*v3.py', 'market_ws_guard.py', 'requirements-v2.txt', 'requirements-test.txt', 'tests/*.py', 'capture_continuity_probe.py', '.github/workflows/capture-continuity-probe.yml', '.github/workflows/*v2*.yml']
 permissions:
   contents: read
 jobs:
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install -r requirements-v2.txt
+      - run: python -m pip install -r requirements-test.txt
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - run: python -m py_compile archive_v2.py capture_runtime_v2.py capture_v2.py quality_v2.py daily_quality_v2.py binance_backfill_v2.py capture_v3.py microstructure_v3.py microstructure_math_v3.py
   live-smoke:

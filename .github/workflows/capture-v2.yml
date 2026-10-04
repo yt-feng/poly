@@ -2,7 +2,7 @@ name: capture-v2
 on:
   push:
     branches: [main]
-    paths: ['capture_v2.py', 'capture_runtime_v2.py', '*v3.py', 'market_ws_guard.py', 'archive_v2.py', 'capture_watchdog_v2.py', 'quality_v2.py', 'requirements-v2.txt', '.github/workflows/capture-v2.yml']
+    paths: ['capture_v2.py', 'capture_runtime_v2.py', '*v3.py', 'market_ws_guard.py', 'archive_v2.py', 'capture_watchdog_v2.py', 'quality_v2.py', 'requirements-v2.txt', 'requirements-test.txt', '.github/workflows/capture-v2.yml']
   workflow_dispatch:
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -r requirements-v2.txt
+      - run: python -m pip install -r requirements-test.txt
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Four-hour capture with durable rolling release checkpoints
         run: |
