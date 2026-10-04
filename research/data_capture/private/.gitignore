@@ -1,0 +1,4 @@
+# Only encrypted envelopes may be kept locally; plaintext and runtime keys never enter Git.
+*
+!.gitignore
+!*.enc

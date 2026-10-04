@@ -1,0 +1,14 @@
+{
+  "experiment_id": "EXP-0001-capture-foundation",
+  "repo": "yt-feng/poly",
+  "scope": "data_capture",
+  "status": "registered",
+  "registered_at_utc": "2026-10-04T00:00:00Z",
+  "question": "Can a capture run be reproduced from a pinned commit and public feed provenance?",
+  "asset_scope": ["polymarket_btc_5m", "binance_btcusdt_reference"],
+  "excluded_assets": ["equity_daily", "account_data", "private_orders"],
+  "hypothesis": "A run manifest with source identity, UTC windows, checksums, and quality metrics makes replay auditable.",
+  "registration": {"selection_before_observation": true, "public_quotes_are_not_fills": true},
+  "outputs": ["run_manifest.json", "health.json", "quality.json", "sha256 sidecars"],
+  "owner": "repository-maintainer"
+}

@@ -238,6 +238,50 @@ Important note:
 
 These two fields are currently **experimental**. If no reliable trade payload is detected, they may be blank. Blank means **not confidently captured**, not necessarily zero trades.
 
+## Reproducible research records
+
+Capture experiments are registered under `research/data_capture/`. Each run
+must keep a JSON manifest containing the exact commit, UTC windows and dates,
+source URL or immutable release tag, command, dependency environment, output
+checksums, and quality counters. Start from the checked-in template:
+
+```bash
+cp research/data_capture/runs/run-manifest.example.json research/data_capture/runs/<run-id>.json
+python -m unittest tests.test_archive_crypto -v
+```
+
+`poly` owns public capture and data-quality evidence. Strategy research and
+canary evaluation belong in `yt-feng/poly_trade`; `equity_daily` remains a
+separate data product and must not be mixed with BTC five-minute capture.
+
+## Private archive handling
+
+The public repository may contain ciphertext envelopes, never plaintext
+reasoning, keys, account data, or decrypted outputs. Install the maintained
+PyCA dependency and provide the user's passphrase only at runtime through
+`ARCHIVE_KEY` (the user-supplied value is not stored in Git):
+
+```bash
+python -m pip install -r requirements-research.txt
+export ARCHIVE_KEY='<user-supplied-runtime-value>'
+python tools/archive_crypto.py encrypt private-notes.json research/data_capture/private/private-notes.json.enc
+python tools/archive_crypto.py decrypt research/data_capture/private/private-notes.json.enc /tmp/private-notes.json
+unset ARCHIVE_KEY
+```
+
+The utility uses scrypt key derivation and AES-256-GCM authenticated encryption.
+It is offline-only and has no order or credential path. Public quotes, even
+when checksummed, are observations rather than fills and cannot promote a
+strategy to a real-money canary.
+
+## Current verification boundary
+
+The existing capture tests and CI validate code, public-feed contracts, and
+data quality. They do not prove live order behavior, private account state,
+fills, fees, settlement, or canary eligibility. In particular, the open
+capture API/window work remains a separate live-behavior verification item;
+green CI must not be described as live validation.
+
 ## Window mapping logic
 
 This repo uses the convention:

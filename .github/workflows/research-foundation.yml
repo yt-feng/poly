@@ -1,0 +1,63 @@
+name: research-foundation
+
+on:
+  pull_request:
+    paths:
+      - 'research/**'
+      - 'tools/archive_crypto.py'
+      - 'tests/test_archive_crypto.py'
+      - 'requirements-research.txt'
+      - '.github/workflows/research-foundation.yml'
+  push:
+    branches: [main, work]
+    paths:
+      - 'research/**'
+      - 'tools/archive_crypto.py'
+      - 'tests/test_archive_crypto.py'
+      - 'requirements-research.txt'
+      - '.github/workflows/research-foundation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-and-reproducibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements-research.txt
+      - name: Unit tests without feeds or credentials
+        run: python -m unittest tests.test_archive_crypto -v
+      - name: Validate CLI archive round trip without exposing plaintext
+        run: |
+          set -eu
+          printf '%s' 'synthetic-private-note' > /tmp/archive-plain
+          export ARCHIVE_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          python tools/archive_crypto.py encrypt /tmp/archive-plain /tmp/archive.enc
+          rm /tmp/archive-plain
+          python tools/archive_crypto.py decrypt /tmp/archive.enc /tmp/archive-restored
+          test "$(cat /tmp/archive-restored)" = 'synthetic-private-note'
+          rm -f /tmp/archive.enc /tmp/archive-restored
+      - name: Validate machine-readable research records
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path('research/data_capture').glob('experiments/*.json'):
+              obj = json.loads(path.read_text())
+              assert obj['experiment_id'] and obj['scope'] == 'data_capture'
+          obj = json.loads(Path('research/data_capture/runs/run-manifest.example.json').read_text())
+          for key in ('manifest_version','experiment_id','run_id','commit','source','windows','command','outputs','promotion'):
+              assert key in obj, key
+          assert obj['promotion']['real_fill_evidence'] is False
+          print('Research metadata validated.')
+          PY
+      - name: Compile tooling
+        run: python -m py_compile tools/archive_crypto.py

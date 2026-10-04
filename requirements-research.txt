@@ -1,0 +1,2 @@
+# Public-repo-safe archive encryption; PyCA is the maintained upstream package.
+cryptography>=43,<51

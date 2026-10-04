@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "experiment_id": "EXP-0001-capture-foundation",
+  "run_id": "replace-with-utc-run-id",
+  "repo": "yt-feng/poly",
+  "commit": "replace-with-commit-sha",
+  "started_at_utc": "2026-10-04T00:00:00Z",
+  "ended_at_utc": "2026-10-04T00:00:00Z",
+  "source": {"kind": "public_feed_or_release", "url_or_tag": "replace", "retrieved_at_utc": "replace"},
+  "windows": {"count": 0, "utc_dates": [], "window_ids": []},
+  "command": "replace-with-exact-command",
+  "environment": {"python": "replace", "dependencies_lock": "replace"},
+  "outputs": [],
+  "quality": {"rows": 0, "gap_seconds_max": null, "duplicate_rows": 0},
+  "promotion": {"real_fill_evidence": false, "eligible": false, "reason": "template"}
+}
