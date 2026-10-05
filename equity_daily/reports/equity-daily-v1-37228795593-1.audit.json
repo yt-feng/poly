@@ -1,0 +1,894 @@
+{
+  "schema_version": 1,
+  "audit": "offline_equity_daily_release_content_v1",
+  "sample_directory": "equity-release-audit-37228795593-1",
+  "bundle_count": 3,
+  "integrity_ok": true,
+  "errors": [],
+  "bundles": [
+    {
+      "bundle": "equity-daily-bundle-000001.tar",
+      "size_bytes": 14632960,
+      "outer_sha256": {
+        "expected": "ac0f9518c0afc4799c7b95b3e1e9e9d359e981233e40063546c9d51a8f9089c8",
+        "actual": "ac0f9518c0afc4799c7b95b3e1e9e9d359e981233e40063546c9d51a8f9089c8",
+        "ok": true
+      },
+      "member_hashes": {
+        "checked": 16,
+        "passed": 16,
+        "failed": 0,
+        "checks": [
+          {
+            "sidecar": "equity_daily-analytics_http-2026-10-04-000000001744.jsonl.gz.sha256",
+            "file": "equity_daily-analytics_http-2026-10-04-000000001744.jsonl.gz",
+            "expected": "44285ca7e059f0c454c8bd092f906468bba77f2036f85f397829519776294936",
+            "actual": "44285ca7e059f0c454c8bd092f906468bba77f2036f85f397829519776294936",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-audit-2026-10-04-000000000001.jsonl.gz.sha256",
+            "file": "equity_daily-audit-2026-10-04-000000000001.jsonl.gz",
+            "expected": "71b0fff2c5e3980d28b984a72138b6016ee214a53791442d1b2258feeb6a5589",
+            "actual": "71b0fff2c5e3980d28b984a72138b6016ee214a53791442d1b2258feeb6a5589",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-book_http-2026-10-04-000000000493.jsonl.gz.sha256",
+            "file": "equity_daily-book_http-2026-10-04-000000000493.jsonl.gz",
+            "expected": "3089589fc65bcec8b2f2060300855426ac41025e31bff6af5cbe11195107b19a",
+            "actual": "3089589fc65bcec8b2f2060300855426ac41025e31bff6af5cbe11195107b19a",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-candidates-2026-10-04-000000000764.jsonl.gz.sha256",
+            "file": "equity_daily-candidates-2026-10-04-000000000764.jsonl.gz",
+            "expected": "3ebb5c78cfbf085fcd0f0fe0995af086059e9bece978e66ae147c18100aa5841",
+            "actual": "3ebb5c78cfbf085fcd0f0fe0995af086059e9bece978e66ae147c18100aa5841",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-catalog-2026-10-04-000000000011.jsonl.gz.sha256",
+            "file": "equity_daily-catalog-2026-10-04-000000000011.jsonl.gz",
+            "expected": "9f47e9306ef87da70a58ab2228e1922ce233abd0d1930c91c6dead99adb740ff",
+            "actual": "9f47e9306ef87da70a58ab2228e1922ce233abd0d1930c91c6dead99adb740ff",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-clob_metadata_http-2026-10-04-000000001746.jsonl.gz.sha256",
+            "file": "equity_daily-clob_metadata_http-2026-10-04-000000001746.jsonl.gz",
+            "expected": "da643f746ad0676e3535cd4bbb29410187090ee3690ae1aa5d7f01a4bd0d15d4",
+            "actual": "da643f746ad0676e3535cd4bbb29410187090ee3690ae1aa5d7f01a4bd0d15d4",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-discovery_http-2026-10-04-000000000008.jsonl.gz.sha256",
+            "file": "equity_daily-discovery_http-2026-10-04-000000000008.jsonl.gz",
+            "expected": "e2a3b91def9cb4be60d5d05f8e7e3c126c18cd380ff2ba0a1079954a3192a6fc",
+            "actual": "e2a3b91def9cb4be60d5d05f8e7e3c126c18cd380ff2ba0a1079954a3192a6fc",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-discovery_http-2026-10-04-000000000933.jsonl.gz.sha256",
+            "file": "equity_daily-discovery_http-2026-10-04-000000000933.jsonl.gz",
+            "expected": "d2a5ef3ab492a40b441dfee773934d827424a495510816611fba2d246a72f8dc",
+            "actual": "d2a5ef3ab492a40b441dfee773934d827424a495510816611fba2d246a72f8dc",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-discovery_http-2026-10-04-000000001254.jsonl.gz.sha256",
+            "file": "equity_daily-discovery_http-2026-10-04-000000001254.jsonl.gz",
+            "expected": "ad216a2e7588c56a77bb97fc45b8ada306b53d80adbecce263ec8e25e4737bd9",
+            "actual": "ad216a2e7588c56a77bb97fc45b8ada306b53d80adbecce263ec8e25e4737bd9",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-discovery_tags-2026-10-04-000000000002.jsonl.gz.sha256",
+            "file": "equity_daily-discovery_tags-2026-10-04-000000000002.jsonl.gz",
+            "expected": "e26e814450cd4f65bf468a870a5f808d59ec87772429636da4334635f7b1c414",
+            "actual": "e26e814450cd4f65bf468a870a5f808d59ec87772429636da4334635f7b1c414",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-history_http-2026-10-04-000000001747.jsonl.gz.sha256",
+            "file": "equity_daily-history_http-2026-10-04-000000001747.jsonl.gz",
+            "expected": "8da193e5e2c32027901258effa8d10cd1228cff0eab6aa19230d93657fe54ed4",
+            "actual": "8da193e5e2c32027901258effa8d10cd1228cff0eab6aa19230d93657fe54ed4",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-polymarket_ws-2026-10-04-000000000141.jsonl.gz.sha256",
+            "file": "equity_daily-polymarket_ws-2026-10-04-000000000141.jsonl.gz",
+            "expected": "cbdb0a8adfd059b773f6e1aa6fe1abe914cdaa55af06325d6d8e5c500c2d196a",
+            "actual": "cbdb0a8adfd059b773f6e1aa6fe1abe914cdaa55af06325d6d8e5c500c2d196a",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-trades_http-2026-10-04-000000001739.jsonl.gz.sha256",
+            "file": "equity_daily-trades_http-2026-10-04-000000001739.jsonl.gz",
+            "expected": "fd95bf12a981d49805a25440abc49cec8ad18746af1560bbda4ebc4b349e2380",
+            "actual": "fd95bf12a981d49805a25440abc49cec8ad18746af1560bbda4ebc4b349e2380",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000000196.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000000196.jsonl.gz",
+            "expected": "4e81bf6496baaf99a8baecb8317cebc265378a3b4d2260ab639213a9dd1df0b8",
+            "actual": "4e81bf6496baaf99a8baecb8317cebc265378a3b4d2260ab639213a9dd1df0b8",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_ws-2026-10-04-000000000195.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_ws-2026-10-04-000000000195.jsonl.gz",
+            "expected": "60a3e255b921310ff37dac917147df8ed32f2e2aa443a798dbd87b4e1e9db314",
+            "actual": "60a3e255b921310ff37dac917147df8ed32f2e2aa443a798dbd87b4e1e9db314",
+            "ok": true
+          },
+          {
+            "sidecar": "manifest-000001.json.sha256",
+            "file": "manifest-000001.json",
+            "expected": "bb6130124cec9bd15b2dc602c96fcbf95984512ecd1c78ca18f2158c6f975f40",
+            "actual": "bb6130124cec9bd15b2dc602c96fcbf95984512ecd1c78ca18f2158c6f975f40",
+            "ok": true
+          }
+        ],
+        "errors": []
+      },
+      "manifest": {
+        "file": "manifest-000001.json",
+        "run_id": "37228795593-1",
+        "code_sha": "bde5d226375f8414420d215d01cf9e058e9d5795",
+        "declared_file_count": 15,
+        "declared_files_present_in_tar": 15,
+        "declared_files_missing_from_tar": 0,
+        "counts": {
+          "analytics_http": 26,
+          "audit": 68,
+          "book_http": 202,
+          "candidates": 312,
+          "catalog": 623,
+          "clob_metadata_http": 12,
+          "discovery_http": 56,
+          "discovery_tags": 6,
+          "history_http": 24,
+          "polymarket_ws": 794,
+          "trades_http": 13,
+          "underlying_yahoo_decoded": 4,
+          "underlying_yahoo_ws": 4
+        }
+      },
+      "health_claim": {
+        "desired_token_count": 202,
+        "tokens_with_ws_events": 202,
+        "missing_ws_token_count": 0,
+        "polymarket_token_coverage_entries": 202,
+        "alpaca": {
+          "configured": false,
+          "feed": "iex",
+          "subscribed_candidates": []
+        },
+        "futures_metadata_only_symbols": []
+      },
+      "sources": {
+        "polymarket_ws": [
+          {
+            "file": "equity_daily-polymarket_ws-2026-10-04-000000000141.jsonl.gz",
+            "outer_rows": 794,
+            "received_at_ns": {
+              "min": 1791142658616257491,
+              "max": 1791142701120046016,
+              "min_utc": "2026-10-04T19:37:38.616257Z",
+              "max_utc": "2026-10-04T19:38:21.120046Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1790973952177,
+              "max": 1791142701068,
+              "min_utc": "2026-10-02T20:45:52.177000Z",
+              "max_utc": "2026-10-04T19:38:21.068000Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 794,
+            "payload_sha256_failures": 0,
+            "event_count": 948,
+            "event_type_counts": {
+              "best_bid_ask": 140,
+              "book": 202,
+              "price_change": 606
+            },
+            "observed_token_id_count": 202
+          }
+        ],
+        "underlying_yahoo_decoded": [
+          {
+            "file": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000000196.jsonl.gz",
+            "outer_rows": 4,
+            "received_at_ns": {
+              "min": 1791142659748725009,
+              "max": 1791142696773630117,
+              "min_utc": "2026-10-04T19:37:39.748725Z",
+              "max_utc": "2026-10-04T19:38:16.773630Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1791142656000,
+              "max": 1791142693000,
+              "min_utc": "2026-10-04T19:37:36Z",
+              "max_utc": "2026-10-04T19:38:13Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 0,
+            "payload_sha256_failures": 0,
+            "symbols": {
+              "TRY=X": 4
+            }
+          }
+        ],
+        "underlying_yahoo_chart": []
+      },
+      "coverage_reconciliation": {
+        "manifest_declared": {
+          "desired": 202,
+          "with_ws_events": 202,
+          "missing": 0
+        },
+        "independent_sample": {
+          "observed_token_ids_by_ws_file": [
+            202
+          ],
+          "scope": "only the selected tar's WS segment; not a release-wide claim"
+        }
+      }
+    },
+    {
+      "bundle": "equity-daily-bundle-000025.tar",
+      "size_bytes": 9246720,
+      "outer_sha256": {
+        "expected": "66b7d73f49feddaf2484b476fc6a6d04ceb93441bd09522e1c070c08acf11e9d",
+        "actual": "66b7d73f49feddaf2484b476fc6a6d04ceb93441bd09522e1c070c08acf11e9d",
+        "ok": true
+      },
+      "member_hashes": {
+        "checked": 11,
+        "passed": 11,
+        "failed": 0,
+        "checks": [
+          {
+            "sidecar": "equity_daily-analytics_http-2026-10-04-000000244429.jsonl.gz.sha256",
+            "file": "equity_daily-analytics_http-2026-10-04-000000244429.jsonl.gz",
+            "expected": "86e45f4679697cc3d1c555acfe5e0f05071414319d6d9e20e20497e90ce7815b",
+            "actual": "86e45f4679697cc3d1c555acfe5e0f05071414319d6d9e20e20497e90ce7815b",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-audit-2026-10-04-000000246449.jsonl.gz.sha256",
+            "file": "equity_daily-audit-2026-10-04-000000246449.jsonl.gz",
+            "expected": "7fc71c1ca31a71401546fa589032ea069137969718f4e81139e4ee4b5a74527f",
+            "actual": "7fc71c1ca31a71401546fa589032ea069137969718f4e81139e4ee4b5a74527f",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-book_http-2026-10-04-000000244410.jsonl.gz.sha256",
+            "file": "equity_daily-book_http-2026-10-04-000000244410.jsonl.gz",
+            "expected": "f341814a48516153c95c95cddc0e9600ac92be55a357476b1ccae09cf919a7ad",
+            "actual": "f341814a48516153c95c95cddc0e9600ac92be55a357476b1ccae09cf919a7ad",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-catalog-2026-10-04-000000246357.jsonl.gz.sha256",
+            "file": "equity_daily-catalog-2026-10-04-000000246357.jsonl.gz",
+            "expected": "65f30361b85b2fad22c7f7805b0d80fa96bb9e7c91b8d2a9bd7d8d1b7fbf6408",
+            "actual": "65f30361b85b2fad22c7f7805b0d80fa96bb9e7c91b8d2a9bd7d8d1b7fbf6408",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-discovery_http-2026-10-04-000000246334.jsonl.gz.sha256",
+            "file": "equity_daily-discovery_http-2026-10-04-000000246334.jsonl.gz",
+            "expected": "89c1b3710fc4f2e5fa88d720c86f268c1d03553d3f7944bcf5ea6ae699212082",
+            "actual": "89c1b3710fc4f2e5fa88d720c86f268c1d03553d3f7944bcf5ea6ae699212082",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-polymarket_ws-2026-10-04-000000244394.jsonl.gz.sha256",
+            "file": "equity_daily-polymarket_ws-2026-10-04-000000244394.jsonl.gz",
+            "expected": "179ea2f48f7eee7a7b1eb4b2db871552d620d1afbf21b3b8644bfcf86f86c7fd",
+            "actual": "179ea2f48f7eee7a7b1eb4b2db871552d620d1afbf21b3b8644bfcf86f86c7fd",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-trades_http-2026-10-04-000000246522.jsonl.gz.sha256",
+            "file": "equity_daily-trades_http-2026-10-04-000000246522.jsonl.gz",
+            "expected": "04d77a9c154aa170a37e463a6fb8f18d60bfbd3badb89322838ccdc87d28d9c7",
+            "actual": "04d77a9c154aa170a37e463a6fb8f18d60bfbd3badb89322838ccdc87d28d9c7",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_chart-2026-10-04-000000246633.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_chart-2026-10-04-000000246633.jsonl.gz",
+            "expected": "466f2b274345ec7e0265a25cf766dd8cf01c099040b820bfcf2bb17d6ebb4d47",
+            "actual": "466f2b274345ec7e0265a25cf766dd8cf01c099040b820bfcf2bb17d6ebb4d47",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000244436.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000244436.jsonl.gz",
+            "expected": "09d04a1f2f17bbe1edb901a9b497080ce9c6e667e4391a3aa02b7be80a53202a",
+            "actual": "09d04a1f2f17bbe1edb901a9b497080ce9c6e667e4391a3aa02b7be80a53202a",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_ws-2026-10-04-000000244435.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_ws-2026-10-04-000000244435.jsonl.gz",
+            "expected": "4c0b9b7032efaad31f5b24da9a7e314acb89241b4bfe1a757e1820606e1ffccb",
+            "actual": "4c0b9b7032efaad31f5b24da9a7e314acb89241b4bfe1a757e1820606e1ffccb",
+            "ok": true
+          },
+          {
+            "sidecar": "manifest-000025.json.sha256",
+            "file": "manifest-000025.json",
+            "expected": "c829f2db5eb2f80ad653d287ab5d027e67c6050581d387cd4d6c456a4f8828d8",
+            "actual": "c829f2db5eb2f80ad653d287ab5d027e67c6050581d387cd4d6c456a4f8828d8",
+            "ok": true
+          }
+        ],
+        "errors": []
+      },
+      "manifest": {
+        "file": "manifest-000025.json",
+        "run_id": "37228795593-1",
+        "code_sha": "bde5d226375f8414420d215d01cf9e058e9d5795",
+        "declared_file_count": 291,
+        "declared_files_present_in_tar": 10,
+        "declared_files_missing_from_tar": 281,
+        "counts": {
+          "analytics_http": 13906,
+          "audit": 9774,
+          "book_http": 19221,
+          "candidates": 1248,
+          "catalog": 4228,
+          "clob_metadata_http": 2424,
+          "discovery_http": 484,
+          "discovery_tags": 6,
+          "history_http": 4848,
+          "polymarket_ws": 186585,
+          "trades_http": 4759,
+          "underlying_yahoo_chart": 4326,
+          "underlying_yahoo_daily": 84,
+          "underlying_yahoo_decoded": 1654,
+          "underlying_yahoo_ws": 1654
+        }
+      },
+      "health_claim": {
+        "desired_token_count": 202,
+        "tokens_with_ws_events": 202,
+        "missing_ws_token_count": 0,
+        "polymarket_token_coverage_entries": 202,
+        "alpaca": {
+          "configured": false,
+          "feed": "iex",
+          "subscribed_candidates": [
+            "AAPL",
+            "ABNB",
+            "AMZN",
+            "COIN",
+            "EWY",
+            "GOOGL",
+            "HOOD",
+            "META",
+            "MSFT",
+            "MU",
+            "NFLX",
+            "NVDA",
+            "OPEN",
+            "PLTR",
+            "RKLB",
+            "SPCX",
+            "SPY",
+            "TSLA"
+          ]
+        },
+        "futures_metadata_only_symbols": [
+          "CL=F",
+          "DX-Y.NYB",
+          "GC=F",
+          "NG=F",
+          "SI=F"
+        ]
+      },
+      "sources": {
+        "polymarket_ws": [
+          {
+            "file": "equity_daily-polymarket_ws-2026-10-04-000000244394.jsonl.gz",
+            "outer_rows": 7958,
+            "received_at_ns": {
+              "min": 1791149647612976071,
+              "max": 1791149949038294227,
+              "min_utc": "2026-10-04T21:34:07.612976Z",
+              "max_utc": "2026-10-04T21:39:09.038294Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1791149647568,
+              "max": 1791149948995,
+              "min_utc": "2026-10-04T21:34:07.568000Z",
+              "max_utc": "2026-10-04T21:39:08.995000Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 7958,
+            "payload_sha256_failures": 0,
+            "event_count": 7725,
+            "event_type_counts": {
+              "best_bid_ask": 1224,
+              "new_market": 1120,
+              "price_change": 5381
+            },
+            "observed_token_id_count": 154
+          }
+        ],
+        "underlying_yahoo_decoded": [
+          {
+            "file": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000244436.jsonl.gz",
+            "outer_rows": 207,
+            "received_at_ns": {
+              "min": 1791149647996393806,
+              "max": 1791149948205490217,
+              "min_utc": "2026-10-04T21:34:07.996394Z",
+              "max_utc": "2026-10-04T21:39:08.205490Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1790923503000,
+              "max": 1791149945000,
+              "min_utc": "2026-10-02T06:45:03Z",
+              "max_utc": "2026-10-04T21:39:05Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 0,
+            "payload_sha256_failures": 0,
+            "symbols": {
+              "BRL=X": 1,
+              "CHF=X": 39,
+              "EURUSD=X": 34,
+              "GBPUSD=X": 40,
+              "GOOGL": 1,
+              "HOOD": 1,
+              "JPY=X": 56,
+              "KRW=X": 5,
+              "META": 1,
+              "MSFT": 1,
+              "MU": 1,
+              "MXN=X": 1,
+              "NOK=X": 13,
+              "SEK=X": 1,
+              "TRY=X": 3,
+              "ZAR=X": 3,
+              "^DJI": 1,
+              "^FTSE": 1,
+              "^N225": 1,
+              "^RUT": 3
+            }
+          }
+        ],
+        "underlying_yahoo_chart": [
+          {
+            "file": "equity_daily-underlying_yahoo_chart-2026-10-04-000000246633.jsonl.gz",
+            "outer_rows": 168,
+            "received_at_ns": {
+              "min": 1791149701943117286,
+              "max": 1791149923284034943,
+              "min_utc": "2026-10-04T21:35:01.943117Z",
+              "max_utc": "2026-10-04T21:38:43.284035Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1790895600000,
+              "max": 1790985599000,
+              "min_utc": "2026-10-01T23:00:00Z",
+              "max_utc": "2026-10-02T23:59:59Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 168,
+            "payload_sha256_failures": 0,
+            "symbols": {
+              "AAPL": 4,
+              "ABNB": 4,
+              "AMZN": 4,
+              "BRL=X": 3,
+              "CHF=X": 3,
+              "CL=F": 4,
+              "COIN": 4,
+              "DX-Y.NYB": 4,
+              "EURUSD=X": 4,
+              "EWY": 4,
+              "GBPUSD=X": 4,
+              "GC=F": 4,
+              "GOOGL": 4,
+              "HOOD": 4,
+              "JPY=X": 4,
+              "KRW=X": 4,
+              "META": 4,
+              "MSFT": 4,
+              "MU": 4,
+              "MXN=X": 4,
+              "NFLX": 4,
+              "NG=F": 4,
+              "NOK=X": 4,
+              "NVDA": 4,
+              "OPEN": 4,
+              "PLTR": 4,
+              "RKLB": 4,
+              "SEK=X": 4,
+              "SI=F": 4,
+              "SPCX": 4,
+              "SPY": 4,
+              "TRY=X": 4,
+              "TSLA": 4,
+              "USDBRL=X": 1,
+              "USDCHF=X": 1,
+              "ZAR=X": 4,
+              "^DJI": 4,
+              "^FTSE": 4,
+              "^GDAXI": 4,
+              "^GSPC": 4,
+              "^HSI": 4,
+              "^N225": 4,
+              "^NYA": 4,
+              "^RUT": 4
+            },
+            "chart_bar_count": 141148
+          }
+        ]
+      },
+      "coverage_reconciliation": {
+        "manifest_declared": {
+          "desired": 202,
+          "with_ws_events": 202,
+          "missing": 0
+        },
+        "independent_sample": {
+          "observed_token_ids_by_ws_file": [
+            154
+          ],
+          "scope": "only the selected tar's WS segment; not a release-wide claim"
+        }
+      }
+    },
+    {
+      "bundle": "equity-daily-bundle-000049.tar",
+      "size_bytes": 5847040,
+      "outer_sha256": {
+        "expected": "2108b231251347fd18d463892b5b19b15c8b172809c76b1ff3f433d3c44cc10d",
+        "actual": "2108b231251347fd18d463892b5b19b15c8b172809c76b1ff3f433d3c44cc10d",
+        "ok": true
+      },
+      "member_hashes": {
+        "checked": 10,
+        "passed": 10,
+        "failed": 0,
+        "checks": [
+          {
+            "sidecar": "equity_daily-audit-2026-10-04-000000641895.jsonl.gz.sha256",
+            "file": "equity_daily-audit-2026-10-04-000000641895.jsonl.gz",
+            "expected": "f3e9144ebf4a219b277cc1f00869630b3699cd8c888169f5fd2e726b7a78c7bd",
+            "actual": "f3e9144ebf4a219b277cc1f00869630b3699cd8c888169f5fd2e726b7a78c7bd",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-book_http-2026-10-04-000000642651.jsonl.gz.sha256",
+            "file": "equity_daily-book_http-2026-10-04-000000642651.jsonl.gz",
+            "expected": "dedb3809d8db7f250f6455c59a4dc378a062e642d5b67c64b525cdeed150f801",
+            "actual": "dedb3809d8db7f250f6455c59a4dc378a062e642d5b67c64b525cdeed150f801",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-catalog-2026-10-04-000000647321.jsonl.gz.sha256",
+            "file": "equity_daily-catalog-2026-10-04-000000647321.jsonl.gz",
+            "expected": "7be06b0ad4a7ee3a6d02f8f4f04fc76460dc17104284544d8497843989684205",
+            "actual": "7be06b0ad4a7ee3a6d02f8f4f04fc76460dc17104284544d8497843989684205",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-discovery_http-2026-10-04-000000647299.jsonl.gz.sha256",
+            "file": "equity_daily-discovery_http-2026-10-04-000000647299.jsonl.gz",
+            "expected": "47615ec1e55f6860b773e76c2e2cb6421b77f03fb0040feb0c2f532ec1b9fe2b",
+            "actual": "47615ec1e55f6860b773e76c2e2cb6421b77f03fb0040feb0c2f532ec1b9fe2b",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-polymarket_ws-2026-10-04-000000641898.jsonl.gz.sha256",
+            "file": "equity_daily-polymarket_ws-2026-10-04-000000641898.jsonl.gz",
+            "expected": "718d5c4e01e8c2524aedfca4778d5965f895c760926960293e16a47891b32802",
+            "actual": "718d5c4e01e8c2524aedfca4778d5965f895c760926960293e16a47891b32802",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-trades_http-2026-10-04-000000641894.jsonl.gz.sha256",
+            "file": "equity_daily-trades_http-2026-10-04-000000641894.jsonl.gz",
+            "expected": "ea5d9d79eb0c11a82e50d5aa755987431cce0cd2e11f616ca7e37e2e1d6ba6dd",
+            "actual": "ea5d9d79eb0c11a82e50d5aa755987431cce0cd2e11f616ca7e37e2e1d6ba6dd",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_chart-2026-10-04-000000641935.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_chart-2026-10-04-000000641935.jsonl.gz",
+            "expected": "648840d76079af82b71e402d6970daf3f0a62ac46eeb8d26c25ee542e7bac00d",
+            "actual": "648840d76079af82b71e402d6970daf3f0a62ac46eeb8d26c25ee542e7bac00d",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000641897.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000641897.jsonl.gz",
+            "expected": "01a283dc42c95f44e81d1ceedd89a1a1e3dae7a17c92872fa9286fb60dabb524",
+            "actual": "01a283dc42c95f44e81d1ceedd89a1a1e3dae7a17c92872fa9286fb60dabb524",
+            "ok": true
+          },
+          {
+            "sidecar": "equity_daily-underlying_yahoo_ws-2026-10-04-000000641896.jsonl.gz.sha256",
+            "file": "equity_daily-underlying_yahoo_ws-2026-10-04-000000641896.jsonl.gz",
+            "expected": "ab80b24676c0fb324a14555f1fbceb473c00a5689a8194ee4e4cb35c9ff89b30",
+            "actual": "ab80b24676c0fb324a14555f1fbceb473c00a5689a8194ee4e4cb35c9ff89b30",
+            "ok": true
+          },
+          {
+            "sidecar": "manifest-000049.json.sha256",
+            "file": "manifest-000049.json",
+            "expected": "aa5be90c1224b0ec25189121307ec70c36ce8808490893945cbcbd54ebbd649e",
+            "actual": "aa5be90c1224b0ec25189121307ec70c36ce8808490893945cbcbd54ebbd649e",
+            "ok": true
+          }
+        ],
+        "errors": []
+      },
+      "manifest": {
+        "file": "manifest-000049.json",
+        "run_id": "37228795593-1",
+        "code_sha": "bde5d226375f8414420d215d01cf9e058e9d5795",
+        "declared_file_count": 578,
+        "declared_files_present_in_tar": 9,
+        "declared_files_missing_from_tar": 569,
+        "counts": {
+          "analytics_http": 27080,
+          "audit": 19468,
+          "book_http": 37976,
+          "candidates": 2496,
+          "catalog": 8084,
+          "clob_metadata_http": 4848,
+          "discovery_http": 968,
+          "discovery_tags": 6,
+          "history_http": 9696,
+          "polymarket_ws": 482293,
+          "trades_http": 9447,
+          "underlying_yahoo_chart": 8568,
+          "underlying_yahoo_daily": 168,
+          "underlying_yahoo_decoded": 18378,
+          "underlying_yahoo_ws": 18378
+        }
+      },
+      "health_claim": {
+        "desired_token_count": 202,
+        "tokens_with_ws_events": 202,
+        "missing_ws_token_count": 0,
+        "polymarket_token_coverage_entries": 202,
+        "alpaca": {
+          "configured": false,
+          "feed": "iex",
+          "subscribed_candidates": [
+            "AAPL",
+            "ABNB",
+            "AMZN",
+            "COIN",
+            "EWY",
+            "GOOGL",
+            "HOOD",
+            "META",
+            "MSFT",
+            "MU",
+            "NFLX",
+            "NVDA",
+            "OPEN",
+            "PLTR",
+            "RKLB",
+            "SPCX",
+            "SPY",
+            "TSLA"
+          ]
+        },
+        "futures_metadata_only_symbols": []
+      },
+      "sources": {
+        "polymarket_ws": [
+          {
+            "file": "equity_daily-polymarket_ws-2026-10-04-000000641898.jsonl.gz",
+            "outer_rows": 3752,
+            "received_at_ns": {
+              "min": 1791156898443485476,
+              "max": 1791157055874764583,
+              "min_utc": "2026-10-04T23:34:58.443485Z",
+              "max_utc": "2026-10-04T23:37:35.874764Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1791156898401,
+              "max": 1791157055770,
+              "min_utc": "2026-10-04T23:34:58.401000Z",
+              "max_utc": "2026-10-04T23:37:35.770000Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 3752,
+            "payload_sha256_failures": 0,
+            "event_count": 3632,
+            "event_type_counts": {
+              "best_bid_ask": 530,
+              "book": 6,
+              "last_trade_price": 3,
+              "new_market": 8,
+              "price_change": 3085
+            },
+            "observed_token_id_count": 140
+          }
+        ],
+        "underlying_yahoo_decoded": [
+          {
+            "file": "equity_daily-underlying_yahoo_decoded-2026-10-04-000000641897.jsonl.gz",
+            "outer_rows": 653,
+            "received_at_ns": {
+              "min": 1791156898441086347,
+              "max": 1791157055548191034,
+              "min_utc": "2026-10-04T23:34:58.441087Z",
+              "max_utc": "2026-10-04T23:37:35.548191Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1790955329000,
+              "max": 1791157054000,
+              "min_utc": "2026-10-02T15:35:29Z",
+              "max_utc": "2026-10-04T23:37:34Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 0,
+            "payload_sha256_failures": 0,
+            "symbols": {
+              "CHF=X": 59,
+              "DX-Y.NYB": 56,
+              "EURUSD=X": 56,
+              "GBPUSD=X": 69,
+              "GOOGL": 1,
+              "HOOD": 1,
+              "JPY=X": 69,
+              "KRW=X": 15,
+              "MXN=X": 69,
+              "NOK=X": 60,
+              "SEK=X": 62,
+              "TRY=X": 66,
+              "ZAR=X": 68,
+              "^FTSE": 2
+            }
+          }
+        ],
+        "underlying_yahoo_chart": [
+          {
+            "file": "equity_daily-underlying_yahoo_chart-2026-10-04-000000641935.jsonl.gz",
+            "outer_rows": 126,
+            "received_at_ns": {
+              "min": 1791156899572293283,
+              "max": 1791157050696849938,
+              "min_utc": "2026-10-04T23:34:59.572293Z",
+              "max_utc": "2026-10-04T23:37:30.696850Z",
+              "unit": "ns"
+            },
+            "source_timestamp": {
+              "min": 1790899200000,
+              "max": 1791157047000,
+              "min_utc": "2026-10-02T00:00:00Z",
+              "max_utc": "2026-10-04T23:37:27Z",
+              "unit": "ms"
+            },
+            "payload_sha256_checks": 126,
+            "payload_sha256_failures": 0,
+            "symbols": {
+              "AAPL": 3,
+              "ABNB": 3,
+              "AMZN": 3,
+              "BRL=X": 3,
+              "CHF=X": 2,
+              "CL=F": 3,
+              "COIN": 3,
+              "DX-Y.NYB": 3,
+              "EURUSD=X": 3,
+              "EWY": 3,
+              "GBPUSD=X": 3,
+              "GC=F": 3,
+              "GOOGL": 3,
+              "HOOD": 3,
+              "JPY=X": 3,
+              "KRW=X": 3,
+              "META": 3,
+              "MSFT": 3,
+              "MU": 3,
+              "MXN=X": 3,
+              "NFLX": 3,
+              "NG=F": 3,
+              "NOK=X": 3,
+              "NVDA": 3,
+              "OPEN": 3,
+              "PLTR": 3,
+              "RKLB": 3,
+              "SEK=X": 3,
+              "SI=F": 3,
+              "SPCX": 3,
+              "SPY": 3,
+              "TRY=X": 3,
+              "TSLA": 3,
+              "USDCHF=X": 1,
+              "ZAR=X": 3,
+              "^DJI": 3,
+              "^FTSE": 3,
+              "^GDAXI": 3,
+              "^GSPC": 3,
+              "^HSI": 3,
+              "^N225": 3,
+              "^NYA": 3,
+              "^RUT": 3
+            },
+            "chart_bar_count": 60782
+          }
+        ]
+      },
+      "coverage_reconciliation": {
+        "manifest_declared": {
+          "desired": 202,
+          "with_ws_events": 202,
+          "missing": 0
+        },
+        "independent_sample": {
+          "observed_token_ids_by_ws_file": [
+            140
+          ],
+          "scope": "only the selected tar's WS segment; not a release-wide claim"
+        }
+      }
+    }
+  ],
+  "release": {
+    "repository": "yt-feng/poly",
+    "tag": "equity-daily-v1-37228795593-1",
+    "release_url": "https://github.com/yt-feng/poly/releases/tag/equity-daily-v1-37228795593-1",
+    "target_commit": "bde5d226375f8414420d215d01cf9e058e9d5795",
+    "created_at": "2026-10-04T19:27:49Z",
+    "published_at": "2026-10-04T19:38:22Z",
+    "asset_count": 98,
+    "bundle_count": 49,
+    "sidecar_count": 49,
+    "metadata_source": "GitHub Releases REST GET performed 2026-10-05; this file records release metadata only",
+    "sample_assets": [
+      {
+        "bundle": "equity-daily-bundle-000001.tar",
+        "bundle_asset_id": 610506584,
+        "bundle_size_bytes": 14632960,
+        "bundle_sha256": "ac0f9518c0afc4799c7b95b3e1e9e9d359e981233e40063546c9d51a8f9089c8",
+        "sidecar_asset_id": 610506583,
+        "sidecar_size_bytes": 97,
+        "sidecar_asset_sha256": "b97cf4b1f43c7147cdef6eec43d91aba8318e4aa5f4ce6e23cafd6f244f9403b"
+      },
+      {
+        "bundle": "equity-daily-bundle-000025.tar",
+        "bundle_asset_id": 610733755,
+        "bundle_size_bytes": 9246720,
+        "bundle_sha256": "66b7d73f49feddaf2484b476fc6a6d04ceb93441bd09522e1c070c08acf11e9d",
+        "sidecar_asset_id": 610733753,
+        "sidecar_size_bytes": 97,
+        "sidecar_asset_sha256": "d5d1686e089145c8e6ece2315cb4d42ede181dec44dd2ba07f80160303c4c043"
+      },
+      {
+        "bundle": "equity-daily-bundle-000049.tar",
+        "bundle_asset_id": 610944804,
+        "bundle_size_bytes": 5847040,
+        "bundle_sha256": "2108b231251347fd18d463892b5b19b15c8b172809c76b1ff3f433d3c44cc10d",
+        "sidecar_asset_id": 610944803,
+        "sidecar_size_bytes": 97,
+        "sidecar_asset_sha256": "23843efed3b3b5c2b4e59050d56bd54d59376284b3bbd3fdf7ac06cc4c4c2f76"
+      }
+    ],
+    "release_body": "Independent equity_daily raw-data bundles. No BTC observations/strategies. Each tar contains native payload segments, manifests and SHA256 sidecars; see equity_daily/README.md for feed limitations and decoding."
+  }
+}

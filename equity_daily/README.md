@@ -111,6 +111,31 @@ with gzip.open('equity_daily-polymarket_ws-....jsonl.gz', 'rt') as f:
         assert hashlib.sha256(raw).hexdigest() == row['payload_sha256']
 ```
 
+### Auditing a published release
+
+`equity_daily/release_audit.py` is an offline, read-only checker for bundles that
+have already been downloaded. It validates the outer release sidecar, every
+inner member sidecar and retained payload digest; it also reports observed
+Polymarket token IDs, receipt/source timestamp ranges, Yahoo decoded rows and
+chart bar counts. It rejects unsafe tar members and never downloads, decrypts or
+fills missing rows. Keep the tars and extracted payloads outside git:
+
+```bash
+python -m equity_daily.release_audit \
+  --input-dir /tmp/equity-release-audit-37228795593-1 \
+  --metadata equity_daily/reports/equity-daily-v1-37228795593-1.metadata.json \
+  --output /tmp/equity-daily-release-audit.json
+```
+
+The checked-in report for release
+[`equity-daily-v1-37228795593-1`](reports/equity-daily-v1-37228795593-1.audit.md)
+is deliberately limited to release metadata and aggregate counts. It samples
+bundles 000001, 000025 and 000049 rather than claiming all 49 bundles were
+downloaded. A cumulative manifest may reference files not present in its
+newly-closed tar; the audit reports that difference. Its 202/202 token statement
+is a manifest health claim, not proof of continuous receipt, and public Yahoo
+quotes/chart bars are not exchange fills or settlement evidence.
+
 ## Optional credentials and publication rights
 
 Default Polymarket/Yahoo paths need no API key. Yahoo is unofficial and can reject

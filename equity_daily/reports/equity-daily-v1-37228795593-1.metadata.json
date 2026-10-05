@@ -1,0 +1,42 @@
+{
+  "repository": "yt-feng/poly",
+  "tag": "equity-daily-v1-37228795593-1",
+  "release_url": "https://github.com/yt-feng/poly/releases/tag/equity-daily-v1-37228795593-1",
+  "target_commit": "bde5d226375f8414420d215d01cf9e058e9d5795",
+  "created_at": "2026-10-04T19:27:49Z",
+  "published_at": "2026-10-04T19:38:22Z",
+  "asset_count": 98,
+  "bundle_count": 49,
+  "sidecar_count": 49,
+  "metadata_source": "GitHub Releases REST GET performed 2026-10-05; this file records release metadata only",
+  "sample_assets": [
+    {
+      "bundle": "equity-daily-bundle-000001.tar",
+      "bundle_asset_id": 610506584,
+      "bundle_size_bytes": 14632960,
+      "bundle_sha256": "ac0f9518c0afc4799c7b95b3e1e9e9d359e981233e40063546c9d51a8f9089c8",
+      "sidecar_asset_id": 610506583,
+      "sidecar_size_bytes": 97,
+      "sidecar_asset_sha256": "b97cf4b1f43c7147cdef6eec43d91aba8318e4aa5f4ce6e23cafd6f244f9403b"
+    },
+    {
+      "bundle": "equity-daily-bundle-000025.tar",
+      "bundle_asset_id": 610733755,
+      "bundle_size_bytes": 9246720,
+      "bundle_sha256": "66b7d73f49feddaf2484b476fc6a6d04ceb93441bd09522e1c070c08acf11e9d",
+      "sidecar_asset_id": 610733753,
+      "sidecar_size_bytes": 97,
+      "sidecar_asset_sha256": "d5d1686e089145c8e6ece2315cb4d42ede181dec44dd2ba07f80160303c4c043"
+    },
+    {
+      "bundle": "equity-daily-bundle-000049.tar",
+      "bundle_asset_id": 610944804,
+      "bundle_size_bytes": 5847040,
+      "bundle_sha256": "2108b231251347fd18d463892b5b19b15c8b172809c76b1ff3f433d3c44cc10d",
+      "sidecar_asset_id": 610944803,
+      "sidecar_size_bytes": 97,
+      "sidecar_asset_sha256": "23843efed3b3b5c2b4e59050d56bd54d59376284b3bbd3fdf7ac06cc4c4c2f76"
+    }
+  ],
+  "release_body": "Independent equity_daily raw-data bundles. No BTC observations/strategies. Each tar contains native payload segments, manifests and SHA256 sidecars; see equity_daily/README.md for feed limitations and decoding."
+}
