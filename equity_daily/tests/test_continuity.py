@@ -159,6 +159,86 @@ class ContinuityTests(unittest.TestCase):
                 server.runs[current]['status'] = 'in_progress'
                 server.jobs[current] = [job_fixture(status='completed', conclusion='success')]
 
+    def test_queued_to_in_progress_between_inventory_reads_keeps_old_worker(self):
+        # This four-hour-old run is outside the restart window. Reading
+        # in_progress before queued used to lose it from both snapshots.
+        server = FakeGitHub([
+            run_fixture(590, status='queued', created_at=NOW - timedelta(hours=4)),
+        ], {590: [job_fixture()]})
+        transitioned = False
+
+        def advancing_server(args):
+            nonlocal transitioned
+            response = server(args)
+            query = parse_qs(urlsplit(args[1]).query)
+            if query.get('status') == ['in_progress'] and not transitioned:
+                server.runs[590]['status'] = 'in_progress'
+                transitioned = True
+            return response
+
+        result = continuity.ensure_capture(REPO, now=NOW, call=advancing_server)
+        self.assertTrue(transitioned)
+        self.assertEqual(result['action'], 'already_active')
+        self.assertIn(590, result['runs'])
+        self.assertEqual(server.posts, [])
+
+    def test_old_worker_moving_back_to_waiting_cannot_disappear(self):
+        # Forward ordering alone can miss a long-running workflow that returns
+        # to waiting after that bucket was read. It is also too old for the
+        # fifteen-minute reconciliation, so the final reverse scan must see it.
+        server = FakeGitHub([
+            run_fixture(593, created_at=NOW - timedelta(hours=4)),
+        ], {593: [job_fixture(status='waiting')]})
+        transitioned = False
+
+        def awaiting_approval(args):
+            nonlocal transitioned
+            response = server(args)
+            query = parse_qs(urlsplit(args[1]).query)
+            if query.get('status') == ['waiting'] and not transitioned:
+                server.runs[593]['status'] = 'waiting'
+                transitioned = True
+            return response
+
+        result = continuity.ensure_capture(REPO, now=NOW, call=awaiting_approval)
+        self.assertTrue(transitioned)
+        self.assertEqual(result['action'], 'already_active')
+        self.assertIn(593, result['runs'])
+        self.assertEqual(server.posts, [])
+
+    def test_fresh_preflight_started_during_scan_is_reconciled_before_dispatch(self):
+        # A manual or scheduled run can appear after its status bucket was
+        # read. Its all-status recent record must block an extra successor.
+        for status, job in (('queued', 'test'), ('in_progress', 'smoke')):
+            with self.subTest(status=status, job=job):
+                server = FakeGitHub()
+                scanned = set()
+
+                def concurrent_start(args):
+                    response = server(args)
+                    query = parse_qs(urlsplit(args[1]).query)
+                    if 'status' in query:
+                        scanned.add(query['status'][0])
+                        if scanned == continuity.ACTIVE and 591 not in server.runs:
+                            server.runs[591] = run_fixture(
+                                591, status=status, created_at=NOW)
+                            server.jobs[591] = [job_fixture(job)]
+                    return response
+
+                result = continuity.ensure_capture(REPO, now=NOW, call=concurrent_start)
+                self.assertEqual(result['action'], 'already_active')
+                self.assertIn(591, result['runs'])
+                self.assertEqual(server.posts, [])
+
+    def test_four_hour_worker_does_not_depend_on_recent_restart_inventory(self):
+        server = FakeGitHub([
+            run_fixture(592, created_at=NOW - timedelta(hours=4)),
+        ], {592: [job_fixture()]})
+        result = self.ensure(server)
+        self.assertEqual(result['action'], 'already_active')
+        self.assertIn(592, result['runs'])
+        self.assertEqual(server.posts, [])
+
     def test_every_active_status_prevents_duplicate_dispatch(self):
         self.assertTrue({'queued', 'in_progress', 'waiting', 'pending', 'requested'}
                         .issubset(continuity.ACTIVE))

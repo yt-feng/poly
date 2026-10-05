@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 
 ACTIVE = {"requested", "waiting", "pending", "queued", "in_progress"}
+ACTIVE_SCAN_ORDER = ("requested", "waiting", "pending", "queued", "in_progress")
 WORKFLOW = "equity-daily.yml"
 WORKFLOW_PATH = f".github/workflows/{WORKFLOW}"
 PRODUCTION_EVENTS = {"workflow_dispatch", "schedule", "push"}
@@ -159,18 +160,26 @@ def ensure_capture(
         raise ValueError("Unknown target workflow state; refusing a blind dispatch")
 
     active_runs: dict[int, dict] = {}
-    # A single recent-runs page can hide an older running collector.  Ask for
-    # every active state independently and follow every page in each response.
-    for status in sorted(ACTIVE):
-        endpoint = f"{workflow_endpoint}/runs?branch=main&status={status}&per_page=100"
-        for run in _pages(call, endpoint, "workflow_runs"):
-            _identity(run, repo, workflow_id)
-            if run["event"] not in PRODUCTION_EVENTS or run["status"] not in ACTIVE:
-                continue
-            previous = active_runs.get(run["id"])
-            if previous is not None and previous["status"] != run["status"]:
-                raise RuntimeError("Active run changed during inventory; refusing a blind dispatch")
-            active_runs[run["id"]] = run
+
+    def remember_active(run: dict) -> None:
+        _identity(run, repo, workflow_id)
+        if run["event"] not in PRODUCTION_EVENTS or run["status"] not in ACTIVE:
+            return
+        previous = active_runs.get(run["id"])
+        if previous is not None and previous["status"] != run["status"]:
+            raise RuntimeError("Active run changed during inventory; refusing a blind dispatch")
+        active_runs[run["id"]] = run
+
+    def scan_active(statuses: tuple[str, ...]) -> None:
+        for status in statuses:
+            endpoint = f"{workflow_endpoint}/runs?branch=main&status={status}&per_page=100"
+            for run in _pages(call, endpoint, "workflow_runs"):
+                remember_active(run)
+
+    # Lifecycle order prevents queued -> in_progress from slipping between the
+    # two buckets.  Paginating each state also covers old runs outside the
+    # recent-start window, even when there are many newer completed runs.
+    scan_active(ACTIVE_SCAN_ORDER)
 
     def capture_ended(run_id: int) -> bool:
         run = _object(_json(call, ["api", f"repos/{repo}/actions/runs/{run_id}"]), "run response")
@@ -192,24 +201,28 @@ def ensure_capture(
             raise ValueError("Completed capture has no terminal conclusion; refusing a blind dispatch")
         return True
 
-    draining: list[int] = []
-    if current_run_id is not None:
-        current = active_runs.get(current_run_id)
-        if current is None:
-            raise RuntimeError("Current run is absent from the active inventory; refusing to ignore an unknown run")
-        if current["status"] != "in_progress" or not capture_ended(current_run_id):
-            raise RuntimeError("Current capture job is not terminal; refusing an overlapping successor")
-        draining.append(current_run_id)
-    active: list[int] = []
-    for run_id, run in sorted(active_runs.items()):
-        if run_id == current_run_id:
-            continue
-        # A watchdog can replace a pending handoff under the shared lock.  The
-        # ended collector must then be recognized as draining by that watchdog.
-        if run["status"] == "in_progress" and capture_ended(run_id):
-            draining.append(run_id)
-        else:
-            active.append(run_id)
+    def classify_active() -> tuple[list[int], list[int]]:
+        draining: list[int] = []
+        if current_run_id is not None:
+            current = active_runs.get(current_run_id)
+            if current is None:
+                raise RuntimeError("Current run is absent from the active inventory; refusing to ignore an unknown run")
+            if current["status"] != "in_progress" or not capture_ended(current_run_id):
+                raise RuntimeError("Current capture job is not terminal; refusing an overlapping successor")
+            draining.append(current_run_id)
+        active: list[int] = []
+        for run_id, run in sorted(active_runs.items()):
+            if run_id == current_run_id:
+                continue
+            # A watchdog can replace a pending handoff under the shared lock.
+            # It must recognize the already-ended collector as draining.
+            if run["status"] == "in_progress" and capture_ended(run_id):
+                draining.append(run_id)
+            else:
+                active.append(run_id)
+        return active, draining
+
+    active, draining = classify_active()
     if active:
         return {"action": "already_active", "runs": active, "draining_runs": draining}
 
@@ -220,11 +233,28 @@ def ensure_capture(
     )
     recent: set[int] = set()
     for run in recent_runs:
-        _identity(run, repo, workflow_id)
+        # This status-independent response catches runs created or advanced
+        # after their status bucket was read; use it for liveness, not just the
+        # restart limit.  Earlier active sightings are never discarded.
+        remember_active(run)
         if run["event"] in PRODUCTION_EVENTS and _created_at(run) >= cutoff:
             recent.add(run["id"])
+    active, draining = classify_active()
+    if active:
+        return {"action": "already_active", "runs": active, "draining_runs": draining}
     if len(recent) >= RESTART_LIMIT:
         raise RuntimeError(f"{RESTART_LIMIT} captures started within 15 minutes; refusing a restart loop")
+
+    # Some transitions go backwards (for example in_progress -> waiting for
+    # approval).  A bounded reverse sweep catches older runs that moved to an
+    # already-read bucket and therefore were absent from the first sweep and
+    # the recent window.  This is a fresh safety check, never a failed-request
+    # retry.  The production job lock also serializes externally introduced
+    # captures that race with the final snapshot.
+    scan_active(tuple(reversed(ACTIVE_SCAN_ORDER)))
+    active, draining = classify_active()
+    if active:
+        return {"action": "already_active", "runs": active, "draining_runs": draining}
 
     # No retry: a response lost after acceptance must not create a second run.
     result = _object(_json(call, [
