@@ -80,14 +80,35 @@ published. Release publication retries identical immutable bytes, confirms remot
 sizes/digests when available, and retains local recovery copies. No raw data is
 committed to the git code history. Later manifests can reference earlier bundles.
 
-Production runs 4h, scheduled every 4h, with first checkpoint at about 45s and
-rolling publication every 300s. Test/smoke and runner queues create gaps; GitHub
-Actions is **not zero-gap 24/7 market infrastructure**. All 47 deterministic tests
+Production runs 4h, with first checkpoint at about 45s and rolling publication
+every 300s. Each run hands off directly to its successor after the capture job
+ends, including failure. An independent `equity-daily-watchdog.yml` reacts to
+completed runs and checks every 15 minutes to recover cancellation or a missed
+handoff. It does not wait for the old four-hour schedule. Test/smoke and runner
+queues still create gaps; GitHub Actions is **not zero-gap 24/7 market
+infrastructure**, and scheduled recovery itself can be delayed. All deterministic tests
 and a 150s live read-only smoke must pass before production starts. Smoke requires
 at least one discovered market and PM market observation; it does not certify
 all underlyings. Smoke/recovery/health Actions artifacts expire after 7 days;
 Releases are the intended durable archive. GitHub limits still apply; review
 storage growth and mirror to object storage if needed, not unlimited retention.
+
+Handoff and watchdog share a concurrency lock, inspect all active run states and
+pages, and start at most one successor. A run still performing test/smoke counts
+as active; a completed capture job can be handed off while its final job drains.
+The dispatch response must acknowledge a distinct run on `main`. Ambiguous API
+failures are not retried blindly. Three starts within 15 minutes halt immediate
+restarts; a later watchdog check can recover after the cooldown. Each decision is
+recorded in Actions logs/summary. Existing raw archives are retained unchanged.
+
+To pause intentionally, set repository variable `EQUITY_CAPTURE_PAUSED=true`
+**before** cancelling a capture. This suppresses both production starts and
+automatic recovery. Set it back to `false` and dispatch the watchdog to resume.
+Disabling the capture workflow also prevents the watchdog from restarting it.
+For a bounded end-to-end check, manually dispatch `equity-daily.yml` with
+`capture_seconds=180`; it publishes real checkpoints and automatically hands off
+to the normal 14,400-second successor. The short duration is never inherited by
+the successor. Allow test/smoke and runner setup time in addition to capture time.
 
 ```bash
 python -m pip install -r equity_daily/requirements.txt
