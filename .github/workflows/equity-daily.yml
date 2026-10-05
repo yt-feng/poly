@@ -2,12 +2,16 @@ name: equity-daily-raw-capture
 on:
   push:
     branches: [main]
-    paths: ['equity_daily/**', '.github/workflows/equity-daily.yml']
+    paths: ['equity_daily/**', '.github/workflows/equity-daily.yml', '.github/workflows/equity-daily-watchdog.yml']
   pull_request:
-    paths: ['equity_daily/**', '.github/workflows/equity-daily.yml']
+    paths: ['equity_daily/**', '.github/workflows/equity-daily.yml', '.github/workflows/equity-daily-watchdog.yml']
   workflow_dispatch:
-  schedule:
-    - cron: '17 */4 * * *'
+    inputs:
+      capture_seconds:
+        description: 'Capture duration; 180 verifies a real archive and handoff, whose successor uses 14400'
+        type: choice
+        default: '14400'
+        options: ['14400', '180']
 permissions:
   contents: read
 jobs:
@@ -18,7 +22,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          sparse-checkout: equity_daily
+          sparse-checkout: |
+            equity_daily
+            .github/workflows
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -56,7 +62,7 @@ jobs:
           compression-level: 0
   capture:
     needs: [test, smoke]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.EQUITY_CAPTURE_PAUSED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 280
     permissions:
@@ -73,6 +79,7 @@ jobs:
       EQUITY_ALPACA_FEED: ${{ vars.EQUITY_ALPACA_FEED || 'iex' }}
       EQUITY_ALPACA_SYMBOLS: ${{ vars.EQUITY_ALPACA_SYMBOLS }}
       EQUITY_ALPACA_PUBLIC_REDISTRIBUTION: ${{ vars.EQUITY_ALPACA_PUBLIC_REDISTRIBUTION || 'false' }}
+      CAPTURE_SECONDS: ${{ inputs.capture_seconds || '14400' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,11 +89,16 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r equity_daily/requirements.txt
-      - name: Four-hour independent raw capture with rolling durable checkpoints
+      - name: Bounded raw capture with rolling durable checkpoints
         run: |
-          python -u -m equity_daily.collector \
+          case "$CAPTURE_SECONDS" in
+            180|14400) ;;
+            *) echo 'Unsupported capture duration'; exit 2 ;;
+          esac
+          timeout --signal=INT --kill-after=30s "$((CAPTURE_SECONDS + 240))s" \
+            python -u -m equity_daily.collector \
             --output equity_daily_output \
-            --seconds 14400 --checkpoint-seconds 300 \
+            --seconds "$CAPTURE_SECONDS" --checkpoint-seconds 300 \
             --release "equity-daily-v1-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
       - name: Retry publishing closed segments after collector exit
         if: always()
@@ -105,8 +117,8 @@ jobs:
             equity_daily_output/catalog.json
             equity_daily_output/manifest-*.json
           retention-days: 7
-      - name: Recover encrypted or public closed bundles after failure
-        if: failure()
+      - name: Recover encrypted or public closed bundles after interruption
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: equity-daily-recovery-${{ github.run_id }}-${{ github.run_attempt }}
@@ -115,3 +127,30 @@ jobs:
             equity_daily_output/equity-daily-bundle-*.tar.sha256
           compression-level: 0
           retention-days: 7
+
+  handoff:
+    needs: [test, smoke, capture]
+    if: ${{ always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.EQUITY_CAPTURE_PAUSED != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    # Serialize the complete inspect/dispatch operation with the watchdog.
+    concurrency:
+      group: equity-daily-continuation
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EQUITY_CAPTURE_PAUSED: ${{ vars.EQUITY_CAPTURE_PAUSED || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: equity_daily
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Acknowledge one successor after the capture job has ended
+        run: python -m equity_daily.continuity --current-run-id "$GITHUB_RUN_ID"

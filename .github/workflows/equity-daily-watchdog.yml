@@ -1,0 +1,36 @@
+name: equity-daily-watchdog
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [equity-daily-raw-capture]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+permissions:
+  contents: read
+  actions: write
+# Same group as the capture's handoff job; never cancel a running decision.
+concurrency:
+  group: equity-daily-continuation
+  cancel-in-progress: false
+jobs:
+  recover:
+    if: ${{ github.ref == 'refs/heads/main' && vars.EQUITY_CAPTURE_PAUSED != 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.event != 'pull_request') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      EQUITY_CAPTURE_PAUSED: ${{ vars.EQUITY_CAPTURE_PAUSED || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: equity_daily
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Recover only when no capture or preparing successor is active
+        run: python -m equity_daily.continuity
