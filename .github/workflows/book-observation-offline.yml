@@ -2,9 +2,9 @@ name: book-observation-offline
 on:
   push:
     branches: [work]
-    paths: ['capture_v2.py', 'capture_v3.py', 'polymarket_quotes.py', 'tests/test_book_observation_semantics.py', 'docs/book_observation_semantics.md', '.github/workflows/book-observation-offline.yml']
+    paths: ['capture_v2.py', 'capture_v3.py', 'measurement_v3.py', 'tests/test_measurement_v3.py', 'polymarket_quotes.py', 'tests/test_book_observation_semantics.py', 'docs/book_observation_semantics.md', '.github/workflows/book-observation-offline.yml']
   pull_request:
-    paths: ['capture_v2.py', 'capture_v3.py', 'polymarket_quotes.py', 'tests/test_book_observation_semantics.py', 'docs/book_observation_semantics.md', '.github/workflows/book-observation-offline.yml']
+    paths: ['capture_v2.py', 'capture_v3.py', 'measurement_v3.py', 'tests/test_measurement_v3.py', 'polymarket_quotes.py', 'tests/test_book_observation_semantics.py', 'docs/book_observation_semantics.md', '.github/workflows/book-observation-offline.yml']
 permissions:
   contents: read
 jobs:
@@ -20,4 +20,4 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r requirements-test.txt
       - run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - run: python -m py_compile capture_v2.py capture_v3.py polymarket_quotes.py
+      - run: python -m py_compile capture_v2.py capture_v3.py measurement_v3.py polymarket_quotes.py

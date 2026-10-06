@@ -39,10 +39,56 @@ None establishes venue closure, fillability, freshness at a decision, or the
 reason liquidity disappeared. Historical CSVs are not repaired or relabeled.
 This patch does not change collection workflows or start any feed.
 
+V3 assigns a capture-scoped attempt ID to each existing book poll. HTTP facts,
+the pre-parser response, parse result and error share that ID through task-local
+context, including concurrent requests. Each completed/cancelled poll emits a
+small `measurement` stream record. The full successful decoded book is stored
+once under `polymarket_rest_book_response`; the successful
+`polymarket_rest_book` raw record has `payload_ref` instead of a duplicated
+`payload`. In-process book consumers still receive the original object. Offline
+readers must resolve the reference; it is not an empty book. Old archives retain
+their original representation.
+
+Raw WS records retain each batch item's available millisecond source timestamp.
+A single `source_event_ms` is set only when all items have the same known time.
+Missing, malformed or differently timed items never acquire an invented common
+timestamp. Request/receive clocks, timestamp age and cross-side skew are
+measurement diagnostics, not authenticated atomicity or one-way latency.
+
+The offline utility creates a complete fixed calendar with ten minutes' lead,
+rounded up to a five-minute boundary, and an exclusive end 48 hours later:
+
+```bash
+python measurement_v3.py plan --anchor "$APPROVED_ANCHOR_UTC" \
+  --output /private/calendar.json
+python measurement_v3.py audit --plan /private/calendar.json \
+  --archive /path/to/existing/run1 --archive /path/to/existing/run2 \
+  --output /private/measurement-report.json
+```
+
+These commands make no requests and do not start or stop any collector. Freeze
+the anchor/calendar before its first window; an approval alone is not evidence
+that production runs the required code. The private protocol defines the
+activation prerequisite. All 576 windows remain, including periods with no
+attempt evidence. The audit uses completed attempt time to select the last
+decision observation, first strictly later entry, and first scheduled target;
+it retains failed first attempts. Original decision/target tolerance and entry
+budget are distinct. Equal-time conflicting choices stay ambiguous. No missing
+window is reclassified as a failed order, an empty book or a payoff.
+
+This compact audit verifies measurement segment hashes and references existing
+raw evidence without copying it. It does not reread all raw files or certify
+their integrity; verify required raw segments against the same manifests before
+using them for deeper analysis. Corrupt measurement segments and conflicting IDs
+fail the audit. Process crashes can leave incomplete `.part` files; missing
+attempts remain unknown. This schema does not satisfy the stricter strategy
+observation contract by itself, and no research/canary promotion is automatic.
+
 Offline verification, with all HTTP interactions mocked:
 
 ```bash
 python -m pip install -r requirements-test.txt
 python -m unittest discover -s tests -p 'test_book_observation_semantics.py' -v
+python -m unittest discover -s tests -p 'test_measurement_v3.py' -v
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
