@@ -96,6 +96,10 @@ class CollectorV3(Collector):
                     response.raise_for_status()
                     if evidence['body_truncated']:
                         raise ValueError('Book response exceeds capture size bound')
+                    mime = response.headers.get('Content-Type','').split(';',1)[0].strip().lower()
+                    if mime != 'application/json' and not (mime.startswith('application/') and mime.endswith('+json')):
+                        raise aiohttp.ContentTypeError(response.request_info, response.history,
+                            status=response.status, message='Unexpected book response content type', headers=response.headers)
                     payload = json.loads(body)
                 except Exception:
                     # Error bodies remain local archive evidence; no stdout,

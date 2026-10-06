@@ -69,6 +69,7 @@ class Content:
 class Response:
     def __init__(self,body,status=200):
         self.content=Content(body);self.status=status
+        self.request_info=None;self.history=()
         self.headers={'Content-Type':'application/json','Set-Cookie':'must-not-be-archived'}
     async def __aenter__(self):return self
     async def __aexit__(self,*args):pass
@@ -138,6 +139,13 @@ class BookObservationTests(unittest.IsolatedAsyncioTestCase):
         e=self.records()[-1]['payload']
         self.assertEqual(base64.b64decode(e['body_base64']),body)
         self.assertEqual(e['status'],200);self.assertEqual(e['error_type'],'JSONDecodeError')
+
+    async def test_wrong_content_type_does_not_relax_existing_json_contract(self):
+        response=Response(b'{}');response.headers['Content-Type']='text/html'
+        self.c.session=Session(response)
+        with self.assertRaises(aiohttp.ContentTypeError):await self.c.get(CLOB+'/book',{'token_id':'t'})
+        e=self.records()[-1]['payload']
+        self.assertEqual(e['status'],200);self.assertEqual(base64.b64decode(e['body_base64']),b'{}')
 
     async def test_denial_preserves_status_body_and_no_retry_during_cooldown(self):
         self.c.session=Session(Response(b'forbidden',403))
