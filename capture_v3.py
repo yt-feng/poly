@@ -130,15 +130,14 @@ class CollectorV3(Collector):
         if source in {'polymarket_ws', 'polymarket_rest_book', 'binance_spot_ws', 'chainlink_rtds'}:
             self.last_data_event_ms[source] = ns//1000000
         record=dict(schema_version=3,source=source,received_at_ns=ns,
-             received_monotonic_ns=mono,source_event_ms=event_ms,connection_id=connection_id,**extra)
+             received_monotonic_ns=mono,source_event_ms=event_ms,connection_id=connection_id,
+             payload=payload,**extra)
         if source=='polymarket_rest_book' and attempt is not None:
-            # Keep the full decoded book once, before parsing. In-process guards
-            # still receive the original object below; offline readers follow
-            # this explicit reference rather than mistaking it for an empty book.
+            # Preserve the established inline payload for existing readers.
+            # The reference is additive provenance, not a replacement for it.
+            # Successful books are also retained in the pre-parser evidence.
             record['payload_ref']={'source':'polymarket_rest_book_response','attempt_id':attempt['attempt_id']}
             record['parse_status']='accepted'
-        else:
-            record['payload']=payload
         self.archive.write('raw',record)
         try:
             if source == 'polymarket_rest_book':
@@ -268,7 +267,7 @@ class CollectorV3(Collector):
         h = super().health()
         h['measurement'] = {'schema':'book-attempt/v1','capture_id':self.capture_id,
                             'completed_poll_attempt_records':self._measurement_count,
-                            'raw_book_storage':'one decoded response plus explicit parse reference'}
+                            'raw_book_storage':'legacy inline payload plus pre-parser response and additive reference'}
         h['microstructure'] = self.micro.health()
         h['poly_ws_health'] = self.ws_guard.summary(current_tokens(self), time.monotonic())
         return h

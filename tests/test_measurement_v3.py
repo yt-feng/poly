@@ -6,12 +6,105 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from capture_v3 import CollectorV3
 from measurement_v3 import make_plan, validate_plan, audit, digest, event_times, side_states, attempt_class, source_flags
 from archive_v2 import Archive
 from test_book_observation_semantics import Response, Session
+
+
+async def write_fixed_archive(root, *, malformed_target=False):
+    """Synthetic books only; the real writer runs against an in-memory HTTP stub."""
+    plan=make_plan('2030-01-01T00:00:00Z');w=plan['windows'][0]
+    c=CollectorV3(['btc'],Path(root));c.capture_id='fixed-offline-fixture'
+    # Force evidence/reference records into different closed gzip segments.
+    c.archive.max_bytes=1
+    market={'slug':w['slug'],'conditionId':'synthetic-condition',
+            'clobTokenIds':['fixture-up','fixture-down'],'outcomes':['Up','Down']}
+    with patch('capture_v3.time.time_ns',return_value=w['start_ms']*1_000_000):
+        c.raw('polymarket_metadata',{'slug':w['slug'],'market':market})
+    expected={}
+    try:
+        for offset in (59,62,90):
+            ms=w['start_ms']+offset*1000
+            for token in ('fixture-up','fixture-down'):
+                body={'asset_id':token,'timestamp':str(ms),
+                      'bids':[{'price':'.4','size':'2'}],'asks':[{'price':'.5','size':'3'}]}
+                if malformed_target and offset==90 and token=='fixture-up':
+                    body['bids'][0]['price']='invalid'
+                c.session=Session(Response(json.dumps(body).encode()))
+                with patch('capture_v3.time.time_ns',return_value=ms*1_000_000):
+                    await c.poll_book(token)
+                expected[f'{c.capture_id}:{c._attempt_sequence}']=body
+    finally:
+        c.archive.close()
+    return plan,expected
+
+
+class ArchiveCompatibilityTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def read_checked(root,kind):
+        rows=[]
+        for item in json.loads((root/'manifest.json').read_text())['files']:
+            path=root/item['file']
+            if item['kind']!=kind:continue
+            if digest(path)!=item['sha256'] or digest(path)!=path.with_name(path.name+'.sha256').read_text().split()[0]:
+                raise ValueError('fixture_checksum_mismatch')
+            with gzip.open(path,'rt') as f:rows.extend((json.loads(line),path.name) for line in f)
+        return rows
+
+    async def test_writer_gzip_reference_inline_replay_and_calendar_end_to_end(self):
+        from microstructure_v3 import Microstructure
+        from validate_market_ws import validate
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);plan,expected=await write_fixed_archive(root)
+            raw=self.read_checked(root,'raw');measurements=self.read_checked(root,'measurement')
+            responses={(r['source'],r['attempt_id']):(r,name) for r,name in raw
+                       if r['source']=='polymarket_rest_book_response'}
+            inline={r['attempt_id']:(r,name) for r,name in raw if r['source']=='polymarket_rest_book'}
+            self.assertEqual(len(inline),6);self.assertEqual(len(measurements),6)
+            replay=Microstructure(None)
+            for m,_ in measurements:
+                ref=m['raw_ref'];response,response_file=responses[(ref['source'],ref['attempt_id'])]
+                r,name=inline[m['attempt_id']]
+                self.assertNotEqual(name,response_file)
+                self.assertEqual(r['payload_ref'],{'source':ref['source'],'attempt_id':ref['attempt_id']})
+                self.assertEqual(r['payload'],response['payload']['book'])
+                self.assertEqual(r['payload'],expected[m['attempt_id']])
+                # Exercise the existing payload consumer with rows read back
+                # from disk. It needs no reference-aware migration.
+                replay.ingest(r['source'],r['payload'],r['connection_id'],r['source_event_ms'],r['received_at_ns']//1_000_000)
+            self.assertEqual(set(replay.poly_books),{'fixture-up','fixture-down'})
+            ws=validate(root);self.assertEqual(ws['source_counts']['polymarket_rest_book'],6)
+            self.assertFalse(ws['rollover_smoke_passed'])
+            result=audit(plan,[root]);self.assertEqual(result['planned_windows'],576)
+            self.assertEqual(result['observed_windows'],1)
+            for kind in ('decision','entry','target'):
+                for role in ('up','down'):
+                    self.assertEqual(result['windows'][0]['checkpoints'][f'60/{kind}/{role}']['status'],'successful_nonempty_book')
+            self.assertTrue(all(w['coverage']=='no_attempt_evidence' for w in result['windows'][1:]))
+            self.assertIsNone(result['pnl']);self.assertFalse(result['promotion_allowed'])
+
+    async def test_malformed_target_keeps_response_without_success_payload(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);plan,_=await write_fixed_archive(root,malformed_target=True)
+            result=audit(plan,[root]);target=result['windows'][0]['checkpoints']['60/target/up']
+            self.assertEqual(target['status'],'transport_or_decode_error')
+            raw=self.read_checked(root,'raw');aid=target['attempt_id']
+            self.assertTrue(any(r.get('attempt_id')==aid and r['source']=='polymarket_rest_book_response' for r,_ in raw))
+            self.assertFalse(any(r.get('attempt_id')==aid and r['source']=='polymarket_rest_book' for r,_ in raw))
+
+    async def test_legacy_inline_record_remains_usable_without_reference(self):
+        from microstructure_v3 import Microstructure
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);a=Archive(root)
+            body={'asset_id':'legacy','bids':[['.4','2']],'asks':[['.5','2']]}
+            a.write('raw',{'schema_version':3,'source':'polymarket_rest_book','payload':body,
+                           'received_at_ns':1790000000000000000,'source_event_ms':None,'connection_id':None});a.close()
+            row,_=self.read_checked(root,'raw')[0];self.assertNotIn('payload_ref',row)
+            replay=Microstructure(None);replay.ingest(row['source'],row['payload'],None,None,1790000000000)
+            self.assertEqual(replay.poly_books['legacy']['payload'],body)
 
 
 class AttemptTests(unittest.IsolatedAsyncioTestCase):
@@ -25,7 +118,7 @@ class AttemptTests(unittest.IsolatedAsyncioTestCase):
             with gzip.open(p,'rt') as f:out.extend(json.loads(line) for line in f)
         return out
 
-    async def test_attempt_join_and_single_raw_book_copy(self):
+    async def test_attempt_join_retains_legacy_inline_payload(self):
         now=int(time.time()*1000)
         market={'slug':'btc-updown-5m-1800000000','conditionId':'c','clobTokenIds':['t','d'],'outcomes':['Up','Down']}
         self.c.raw('polymarket_metadata',{'slug':market['slug'],'market':market})
@@ -37,7 +130,7 @@ class AttemptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(joined),4)
         self.assertEqual(sum(r.get('payload',{}).get('book')==body for r in joined),1)
         parsed=next(r for r in joined if r['source']=='polymarket_rest_book')
-        self.assertNotIn('payload',parsed);self.assertEqual(parsed['payload_ref']['attempt_id'],m['attempt_id'])
+        self.assertEqual(parsed['payload'],body);self.assertEqual(parsed['payload_ref']['attempt_id'],m['attempt_id'])
         self.assertEqual(attempt_class(m),'successful_nonempty_book')
         self.assertEqual(m['market']['role'],'up');self.assertEqual(m['source_event_ms'],now)
         self.assertIsNotNone(self.c.micro.poly_books['t'])

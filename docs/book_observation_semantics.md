@@ -42,12 +42,17 @@ This patch does not change collection workflows or start any feed.
 V3 assigns a capture-scoped attempt ID to each existing book poll. HTTP facts,
 the pre-parser response, parse result and error share that ID through task-local
 context, including concurrent requests. Each completed/cancelled poll emits a
-small `measurement` stream record. The full successful decoded book is stored
-once under `polymarket_rest_book_response`; the successful
-`polymarket_rest_book` raw record has `payload_ref` instead of a duplicated
-`payload`. In-process book consumers still receive the original object. Offline
-readers must resolve the reference; it is not an empty book. Old archives retain
-their original representation.
+small `measurement` stream record. Successful `polymarket_rest_book` records
+retain the established inline `payload`, including token, timestamp and ladders.
+An additive `payload_ref` points to the pre-parser response by source and attempt
+ID; existing readers can keep reading `payload` without resolving a reference.
+The full decoded success is therefore present in both records. This duplication
+preserves compatibility and increases storage by an unmeasured amount. Failed
+parses still retain only the pre-parser response and failure evidence. In-process
+book consumers receive the original object, and old archives remain unchanged.
+The fixed offline tests resolve additive references across compressed segments,
+compare their books with inline payloads, and audit the complete calendar. This
+does not make the compact production audit a verifier of all raw segments.
 
 Raw WS records retain each batch item's available millisecond source timestamp.
 A single `source_event_ms` is set only when all items have the same known time.
