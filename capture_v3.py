@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import aiohttp
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -20,6 +21,7 @@ from official_reference_v3 import OFFICIAL_PRICE_URL
 from market_ws_guard import MarketWSGuard, market_socket, current_tokens
 
 OFFICIAL_PAGE_HEADER_LIMIT = 32*1024
+BOOK_RESPONSE_LIMIT = 4*1024*1024
 
 
 class FeatureArchive(Archive):
@@ -65,9 +67,59 @@ class CollectorV3(Collector):
             self.archive.write('source_errors',dict(schema_version=3,source=source,
                  received_ms=ns//1000000,error=str(exc)[:300]))
 
+    async def book_http(self, url, params):
+        """Retain status and bounded failed bodies without inventing an empty book."""
+        start_ns, start_mono = time.time_ns(), time.monotonic_ns()
+        evidence = dict(requested_token_id=(params or {}).get('token_id'),
+                        request_started_at_ns=start_ns, request_started_monotonic_ns=start_mono,
+                        status=None, response_received_at_ns=None, error_type=None)
+        host = urlparse(url).hostname
+        try:
+            if time.monotonic() < self.cooldown.get(host, 0):
+                evidence['not_sent_reason'] = 'server_directed_cooldown'
+                raise RuntimeError(f'{host}: server-directed cooldown')
+            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                evidence['status'] = response.status
+                evidence['headers'] = {k:response.headers[k] for k in ('Date','Age','Cache-Control','Content-Type') if k in response.headers}
+                if response.status in (403,418,429,451):
+                    retry = response.headers.get('Retry-After','300')
+                    self.cooldown[host] = time.monotonic()+max(60,int(retry) if retry.isdigit() else 300)
+                try:
+                    body = await response.content.readexactly(BOOK_RESPONSE_LIMIT+1)
+                    evidence['body_truncated'] = True
+                except asyncio.IncompleteReadError as exc:
+                    body = exc.partial
+                    evidence['body_truncated'] = False
+                evidence.update(response_received_at_ns=time.time_ns(), response_received_monotonic_ns=time.monotonic_ns(),
+                    captured_body_bytes=len(body), captured_body_sha256=hashlib.sha256(body).hexdigest())
+                try:
+                    response.raise_for_status()
+                    if evidence['body_truncated']:
+                        raise ValueError('Book response exceeds capture size bound')
+                    payload = json.loads(body)
+                except Exception:
+                    # Error bodies remain local archive evidence; no stdout,
+                    # request headers, credentials, or inferred venue status.
+                    import base64
+                    evidence['body_base64'] = base64.b64encode(body).decode('ascii')
+                    raise
+                return payload
+        except Exception as exc:
+            evidence['error_type'] = type(exc).__name__
+            raise
+        finally:
+            evidence['elapsed_ms'] = (time.monotonic_ns()-start_mono)/1000000
+            self.raw('http_timing', dict(host=host, path=urlparse(url).path,
+                requested_token_id=evidence['requested_token_id'], elapsed_ms=evidence['elapsed_ms'],
+                status=evidence['status'], error=evidence['error_type']))
+            self.raw('polymarket_book_http', evidence)
+
     async def get(self,url,params=None):
+        if url == CLOB+'/book':
+            return await self.book_http(url,params)
         start = time.monotonic_ns()
-        status,error = 200,None
+        # The delegated aiohttp path does not expose a response status here.
+        status,error = None,None
         try:
             if url == CLOB+'/time' or url.startswith('https://polymarket.com/event/') or url == OFFICIAL_PRICE_URL:
                 host = urlparse(url).hostname

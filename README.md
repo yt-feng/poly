@@ -10,6 +10,10 @@ The main script is:
 
 - `polymarket_quotes.py`
 
+See [book observation semantics](docs/book_observation_semantics.md) for the
+meaning and limits of blank legacy quotes, and the offline-tested v2/v3 raw
+response/error records. A blank quote alone does not establish a venue event.
+
 It can:
 
 - lock the **current 5-minute window** and sample once per second until the window ends

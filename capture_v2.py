@@ -170,11 +170,21 @@ class Collector:
     async def poll_book(self, token):
         try:
             payload = await self.get(CLOB+'/book', {'token_id': token})
+            # Archive the untouched decoded response before timestamp/ladder
+            # parsing. This source is evidence only: downstream feature engines
+            # must not treat a malformed response as a refreshed valid book.
+            self.raw('polymarket_rest_book_response', {'requested_token_id': token,
+                                                      'book': payload})
             ms = int(time.time()*1000)
             self.books[token] = dict(received_ms=ms, event_ms=epoch_ms(payload.get('timestamp')),
                                     **book_summary(payload))
             self.raw('polymarket_rest_book', payload, event_ms=epoch_ms(payload.get('timestamp')))
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, RuntimeError) as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, RuntimeError,
+                TypeError, KeyError, AttributeError, OverflowError) as e:
+            self.raw('polymarket_book_attempt_error', {'requested_token_id': token,
+                'error_type': type(e).__name__, 'http_status': getattr(e, 'status', None),
+                'prior_book_retained': token in self.books,
+                'prior_received_ms': self.books.get(token, {}).get('received_ms')})
             self.error('polymarket_rest_book', e)
 
     async def poll_books(self):
