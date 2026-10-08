@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import time
 import requests
-from archive_v2 import atomic_json, ensure_release, gh, publish, sha256
+from archive_v2 import atomic_json, ensure_release, error_details, gh, publish, sha256
 
 BASE = 'https://data.binance.vision/data'
 KINDS = ('trades', 'aggTrades', 'klines_1s', 'klines_1m')
@@ -105,6 +105,7 @@ def run(args):
     checks = dict(target_files=expected, completed_files=0, unavailable_files=0, pending_files=0)
     session = requests.Session()
     session.headers['User-Agent'] = 'poly-capture-v2/2.0'
+    failure = None
     try:
         for key, day in planned(symbols, start, end, kinds, args.market):
             existing = state['files'].get(key, {})
@@ -157,18 +158,34 @@ def run(args):
                 # A large trade archive should not block smaller kline archives.
                 state['files'][key] = dict(status='over_budget', checked_epoch=time.time(), url=BASE+'/'+key)
             time.sleep(0.25)
+    except BaseException as error:
+        failure = error
+        raise
     finally:
         session.close()
         atomic_json(state_path, state)
-        if args.publish:
-            publish(STATE_TAG, [state_path], replace=True)
-    checks.update(schema_version=2, start=start.isoformat(), end=end.isoformat(), symbols=symbols,
-                  datasets=kinds, market=args.market, downloaded_this_run=downloaded,
-                  downloaded_bytes=used_bytes, all_requested_files_complete=checks['completed_files']==expected,
-                  note='Unavailable and over-budget archives remain explicit gaps. Raw ZIP timestamps are preserved.')
-    atomic_json(args.output/'backfill-summary.json', checks)
+        # Preserve progress and the original error before any final remote write.
+        # An interrupted loop leaves unvisited archives pending, not invisible.
+        checks['pending_files'] = expected-checks['completed_files']-checks['unavailable_files']
+        checks.update(schema_version=2, start=start.isoformat(), end=end.isoformat(), symbols=symbols,
+                      datasets=kinds, market=args.market, downloaded_this_run=downloaded,
+                      downloaded_bytes=used_bytes, all_requested_files_complete=checks['completed_files']==expected,
+                      status='failed' if failure else 'completed',
+                      note='Unavailable and over-budget archives remain explicit gaps. Raw ZIP timestamps are preserved.')
+        if failure:
+            checks['error'] = error_details(failure)
+        atomic_json(args.output/'backfill-summary.json', checks)
+    # Never replay a failed publication from finally or replace its diagnostic.
+    # The scheduled successor resumes from the durable checkpoint; the workflow
+    # artifact retains the local state and summary when publication is interrupted.
     if args.publish:
-        publish(STATE_TAG, [args.output/'backfill-summary.json'], replace=True)
+        try:
+            publish(STATE_TAG, [state_path], replace=True)
+            publish(STATE_TAG, [args.output/'backfill-summary.json'], replace=True)
+        except BaseException as error:
+            checks.update(status='failed', error=error_details(error))
+            atomic_json(args.output/'backfill-summary.json', checks)
+            raise
     print(json.dumps(checks, indent=2))
 
 

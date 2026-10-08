@@ -70,6 +70,15 @@ jobs:
             fi
           done
 
+      - name: Preserve captured part 1 for recovery
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-recovery-${{ github.run_id }}-${{ github.run_attempt }}-part1
+          path: data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part1_chunk*_btc-updown-5m_quotes.csv
+          if-no-files-found: ignore
+          retention-days: 7
+
   capture_part2:
     needs: capture_part1
     runs-on: ubuntu-latest
@@ -122,6 +131,15 @@ jobs:
               echo "No data changes after chunk ${chunk}"
             fi
           done
+
+      - name: Preserve captured part 2 for recovery
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-recovery-${{ github.run_id }}-${{ github.run_attempt }}-part2
+          path: data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part2_chunk*_btc-updown-5m_quotes.csv
+          if-no-files-found: ignore
+          retention-days: 7
 
   capture_part3:
     needs: capture_part2
@@ -176,6 +194,15 @@ jobs:
             fi
           done
 
+      - name: Preserve captured part 3 for recovery
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-recovery-${{ github.run_id }}-${{ github.run_attempt }}-part3
+          path: data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part3_chunk*_btc-updown-5m_quotes.csv
+          if-no-files-found: ignore
+          retention-days: 7
+
   capture_part4:
     needs: capture_part3
     runs-on: ubuntu-latest
@@ -229,6 +256,15 @@ jobs:
             fi
           done
 
+      - name: Preserve captured part 4 for recovery
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-recovery-${{ github.run_id }}-${{ github.run_attempt }}-part4
+          path: data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part4_chunk*_btc-updown-5m_quotes.csv
+          if-no-files-found: ignore
+          retention-days: 7
+
   capture_part5:
     needs: capture_part4
     runs-on: ubuntu-latest
@@ -281,6 +317,15 @@ jobs:
               echo "No data changes after chunk ${chunk}"
             fi
           done
+
+      - name: Preserve captured part 5 for recovery
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-recovery-${{ github.run_id }}-${{ github.run_attempt }}-part5
+          path: data/monthly_runs/${{ github.run_id }}_attempt${{ github.run_attempt }}/part5_chunk*_btc-updown-5m_quotes.csv
+          if-no-files-found: ignore
+          retention-days: 7
 
   continue_next_run:
     name: Continue with next 24-hour run
