@@ -1,0 +1,34 @@
+name: public-api-contract
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-api-contract-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  offline-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /equity_daily/collector.py
+            /equity_daily/tests/test_data_api_v2_contract.py
+            /tools/run_public_api_contracts.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run synthetic fixtures with network access denied
+        run: python -B tools/run_public_api_contracts.py
+      - name: Upload contract status only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-api-contract-status-${{ github.run_id }}
+          path: public-api-contract-status.json
+          if-no-files-found: error
+          retention-days: 14
