@@ -127,7 +127,8 @@ class ContinuityTests(unittest.TestCase):
 
     def ensure(self, server, current=None):
         return continuity.ensure_capture(
-            REPO, current_run_id=current, now=server.now, call=server)
+            REPO, current_run_id=current, now=server.now, call=server,
+            sleep=lambda delay: None)
 
     def assert_closed(self, server, current=None):
         with self.assertRaises((RuntimeError, ValueError)):
@@ -277,6 +278,89 @@ class ContinuityTests(unittest.TestCase):
             with self.subTest(jobs=jobs):
                 server = FakeGitHub([run_fixture(640)], {640: jobs})
                 self.assert_closed(server, 640)
+
+    def test_handoff_waits_for_capture_status_to_reach_read_api(self):
+        server = FakeGitHub([run_fixture(641)], {641: [job_fixture()]})
+        sleeps = []
+
+        def advance_after_delay(delay):
+            sleeps.append(delay)
+            if len(sleeps) == 2:
+                server.jobs[641] = [job_fixture(status='completed', conclusion='success')]
+
+        result = continuity.ensure_capture(
+            REPO, current_run_id=641, now=NOW, call=server, sleep=advance_after_delay)
+        self.assertEqual(result['action'], 'dispatched')
+        self.assertEqual(sleeps, [2, 5])
+        self.assertEqual(len(server.posts), 1)
+
+    def test_handoff_terminal_wait_is_bounded_and_does_not_dispatch_early(self):
+        server = FakeGitHub([run_fixture(642)], {642: [job_fixture()]})
+        sleeps = []
+        with self.assertRaisesRegex(RuntimeError, 'not terminal'):
+            continuity.ensure_capture(
+                REPO, current_run_id=642, now=NOW, call=server, sleep=sleeps.append)
+        self.assertEqual(sleeps, [2, 5, 10, 20])
+        self.assertEqual(server.posts, [])
+
+    def test_terminal_capture_overrides_stale_current_run_status_bucket(self):
+        server = FakeGitHub([run_fixture(643, status='queued')], {
+            643: [job_fixture(status='completed', conclusion='success')],
+        })
+        self.assertEqual(self.ensure(server, 643)['action'], 'dispatched')
+        self.assertEqual(len(server.posts), 1)
+
+    def test_handoff_does_not_retry_failed_status_request(self):
+        server = FakeGitHub([run_fixture(644)], {644: [job_fixture()]})
+        server.overrides[f'repos/{REPO}/actions/runs/644/jobs?filter=latest&per_page=100'] = RuntimeError('request failed')
+        sleeps = []
+        with self.assertRaisesRegex(RuntimeError, 'request failed'):
+            continuity.ensure_capture(
+                REPO, current_run_id=644, now=NOW, call=server, sleep=sleeps.append)
+        self.assertEqual(sleeps, [])
+        self.assertEqual(server.posts, [])
+
+    def test_runner_dependency_result_handles_stale_current_job_api(self):
+        for result in ('success', 'failure', 'cancelled', 'skipped'):
+            with self.subTest(result=result):
+                server = FakeGitHub([run_fixture(645, status='queued')], {
+                    645: [job_fixture(status='queued')],
+                })
+                sleeps = []
+                response = continuity.ensure_capture(
+                    REPO, current_run_id=645, current_capture_result=result,
+                    now=NOW, call=server, sleep=sleeps.append)
+                self.assertEqual(response['action'], 'dispatched')
+                self.assertEqual(sleeps, [])
+                self.assertEqual(len(server.posts), 1)
+
+    def test_runner_result_never_hides_another_active_capture(self):
+        server = FakeGitHub([run_fixture(646), run_fixture(647)], {
+            646: [job_fixture(status='queued')], 647: [job_fixture()],
+        })
+        response = continuity.ensure_capture(
+            REPO, current_run_id=646, current_capture_result='success',
+            now=NOW, call=server)
+        self.assertEqual(response['action'], 'already_active')
+        self.assertIn(647, response['runs'])
+        self.assertEqual(server.posts, [])
+
+    def test_runner_result_requires_verified_current_identity(self):
+        server = FakeGitHub([run_fixture(648)])
+        server.overrides[f'repos/{REPO}/actions/runs/648'] = run_fixture(648, head_branch='foreign')
+        with self.assertRaisesRegex(RuntimeError, 'identity'):
+            continuity.ensure_capture(
+                REPO, current_run_id=648, current_capture_result='success', now=NOW, call=server)
+        self.assertEqual(server.posts, [])
+
+    def test_runner_result_must_be_terminal_and_have_current_run(self):
+        for current, result in ((None, 'success'), (649, ''), (649, 'queued'), (649, 'unknown')):
+            with self.subTest(current=current, result=result):
+                server = FakeGitHub()
+                with self.assertRaises(ValueError):
+                    continuity.ensure_capture(
+                        REPO, current_run_id=current, current_capture_result=result, now=NOW, call=server)
+                self.assertEqual(server.calls, [])
 
     def test_foreign_run_identity_fails_closed(self):
         for change in (

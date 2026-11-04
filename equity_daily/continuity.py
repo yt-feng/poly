@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from typing import Callable
 from urllib.parse import quote
 
@@ -24,6 +25,8 @@ WORKFLOW_PATH = f".github/workflows/{WORKFLOW}"
 PRODUCTION_EVENTS = {"workflow_dispatch", "schedule", "push"}
 RESTART_LIMIT = 3
 RESTART_WINDOW = timedelta(minutes=15)
+CAPTURE_STATUS_DELAYS = (2, 5, 10, 20)
+DEPENDENCY_RESULTS = {"success", "failure", "cancelled", "skipped"}
 TERMINAL_CONCLUSIONS = {
     "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
     "action_required", "startup_failure", "stale",
@@ -134,7 +137,9 @@ def _identity(run: dict, repo: str, workflow_id: int) -> None:
 
 def ensure_capture(
     repo: str, *, current_run_id: int | None = None, now: datetime | None = None,
+    current_capture_result: str | None = None,
     call: Callable[[list[str]], str] = gh_call,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     """Inspect all active runs, dispatch at most once, and verify its run ID."""
     if os.environ.get("EQUITY_CAPTURE_PAUSED", "").strip().lower() == "true":
@@ -143,6 +148,10 @@ def ensure_capture(
         raise ValueError("GH_REPO must be an owner/repository name")
     if current_run_id is not None:
         current_run_id = _positive_id(current_run_id, "current run ID")
+    if current_capture_result is not None and (
+        current_run_id is None or current_capture_result not in DEPENDENCY_RESULTS
+    ):
+        raise ValueError("A capture dependency result requires a current run and a terminal needs.capture.result")
     now = now or datetime.now(timezone.utc)
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("Current time must include a timezone")
@@ -181,11 +190,14 @@ def ensure_capture(
     # recent-start window, even when there are many newer completed runs.
     scan_active(ACTIVE_SCAN_ORDER)
 
-    def capture_ended(run_id: int) -> bool:
+    def validate_capture_run(run_id: int) -> None:
         run = _object(_json(call, ["api", f"repos/{repo}/actions/runs/{run_id}"]), "run response")
         _identity(run, repo, workflow_id)
         if run["id"] != run_id or run["event"] not in PRODUCTION_EVENTS:
             raise RuntimeError("Capture run response has a mismatched identity")
+
+    def capture_ended(run_id: int) -> bool:
+        validate_capture_run(run_id)
         jobs = _pages(call, f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100", "jobs")
         for job in jobs:
             status = job.get("status")
@@ -201,13 +213,34 @@ def ensure_capture(
             raise ValueError("Completed capture has no terminal conclusion; refusing a blind dispatch")
         return True
 
+    def current_capture_ended() -> bool:
+        if current_capture_result is not None:
+            # The handoff job has `needs: capture`: the runner's terminal
+            # dependency result is tied to this run even when the jobs read
+            # API still reports queued. It never excludes any other run.
+            validate_capture_run(current_run_id)
+            return True
+        # Actions can start a dependent handoff before its read API exposes
+        # the capture's terminal state. Take bounded fresh snapshots without
+        # retrying a failed request or relaxing the no-overlap check.
+        if capture_ended(current_run_id):
+            return True
+        for delay in CAPTURE_STATUS_DELAYS:
+            print(f"Current capture status is still settling; rechecking in {delay}s.", flush=True)
+            sleep(delay)
+            if capture_ended(current_run_id):
+                return True
+        return False
+
     def classify_active() -> tuple[list[int], list[int]]:
         draining: list[int] = []
         if current_run_id is not None:
             current = active_runs.get(current_run_id)
             if current is None:
                 raise RuntimeError("Current run is absent from the active inventory; refusing to ignore an unknown run")
-            if current["status"] != "in_progress" or not capture_ended(current_run_id):
+            # The status bucket may also lag behind the run. A verified
+            # terminal capture, rather than that bucket, proves it ended.
+            if not current_capture_ended():
                 raise RuntimeError("Current capture job is not terminal; refusing an overlapping successor")
             draining.append(current_run_id)
         active: list[int] = []
@@ -282,10 +315,14 @@ def ensure_capture(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--current-run-id", type=int)
+    parser.add_argument("--current-capture-result", choices=sorted(DEPENDENCY_RESULTS))
     args = parser.parse_args()
     code = 0
     try:
-        result = ensure_capture(os.environ.get("GH_REPO", ""), current_run_id=args.current_run_id)
+        result = ensure_capture(
+            os.environ.get("GH_REPO", ""), current_run_id=args.current_run_id,
+            current_capture_result=args.current_capture_result,
+        )
     except (RuntimeError, ValueError, OSError) as exc:
         result = {"action": "error", "error": str(exc)}
         code = 1

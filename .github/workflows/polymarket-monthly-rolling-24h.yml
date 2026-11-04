@@ -53,18 +53,7 @@ jobs:
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part1 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
-              for attempt in 1 2 3; do
-                git fetch origin main
-                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
-                if git push origin HEAD:main; then
-                  break
-                fi
-                if [ "$attempt" -eq 3 ]; then
-                  echo "Push failed after 3 attempts"
-                  exit 1
-                fi
-                sleep 5
-              done
+              bash monthly_git_publish.sh
             else
               echo "No data changes after chunk ${chunk}"
             fi
@@ -115,18 +104,7 @@ jobs:
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part2 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
-              for attempt in 1 2 3; do
-                git fetch origin main
-                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
-                if git push origin HEAD:main; then
-                  break
-                fi
-                if [ "$attempt" -eq 3 ]; then
-                  echo "Push failed after 3 attempts"
-                  exit 1
-                fi
-                sleep 5
-              done
+              bash monthly_git_publish.sh
             else
               echo "No data changes after chunk ${chunk}"
             fi
@@ -177,18 +155,7 @@ jobs:
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part3 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
-              for attempt in 1 2 3; do
-                git fetch origin main
-                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
-                if git push origin HEAD:main; then
-                  break
-                fi
-                if [ "$attempt" -eq 3 ]; then
-                  echo "Push failed after 3 attempts"
-                  exit 1
-                fi
-                sleep 5
-              done
+              bash monthly_git_publish.sh
             else
               echo "No data changes after chunk ${chunk}"
             fi
@@ -239,18 +206,7 @@ jobs:
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part4 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
-              for attempt in 1 2 3; do
-                git fetch origin main
-                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
-                if git push origin HEAD:main; then
-                  break
-                fi
-                if [ "$attempt" -eq 3 ]; then
-                  echo "Push failed after 3 attempts"
-                  exit 1
-                fi
-                sleep 5
-              done
+              bash monthly_git_publish.sh
             else
               echo "No data changes after chunk ${chunk}"
             fi
@@ -301,18 +257,7 @@ jobs:
             if [ -n "$(git status --porcelain data)" ]; then
               git add data
               git commit -m "Add monthly Polymarket data part5 chunk ${chunk}" || echo "Nothing to commit after chunk ${chunk}"
-              for attempt in 1 2 3; do
-                git fetch origin main
-                git pull --rebase origin main || { git rebase --abort || true; exit 1; }
-                if git push origin HEAD:main; then
-                  break
-                fi
-                if [ "$attempt" -eq 3 ]; then
-                  echo "Push failed after 3 attempts"
-                  exit 1
-                fi
-                sleep 5
-              done
+              bash monthly_git_publish.sh
             else
               echo "No data changes after chunk ${chunk}"
             fi
