@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from typing import Callable
 from urllib.parse import quote
 
@@ -24,6 +25,7 @@ WORKFLOW_PATH = f".github/workflows/{WORKFLOW}"
 PRODUCTION_EVENTS = {"workflow_dispatch", "schedule", "push"}
 RESTART_LIMIT = 3
 RESTART_WINDOW = timedelta(minutes=15)
+CAPTURE_STATUS_DELAYS = (2, 5, 10, 20)
 TERMINAL_CONCLUSIONS = {
     "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
     "action_required", "startup_failure", "stale",
@@ -135,6 +137,7 @@ def _identity(run: dict, repo: str, workflow_id: int) -> None:
 def ensure_capture(
     repo: str, *, current_run_id: int | None = None, now: datetime | None = None,
     call: Callable[[list[str]], str] = gh_call,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     """Inspect all active runs, dispatch at most once, and verify its run ID."""
     if os.environ.get("EQUITY_CAPTURE_PAUSED", "").strip().lower() == "true":
@@ -201,13 +204,28 @@ def ensure_capture(
             raise ValueError("Completed capture has no terminal conclusion; refusing a blind dispatch")
         return True
 
+    def current_capture_ended() -> bool:
+        # Actions can start a dependent handoff before its read API exposes
+        # the capture's terminal state. Take bounded fresh snapshots without
+        # retrying a failed request or relaxing the no-overlap check.
+        if capture_ended(current_run_id):
+            return True
+        for delay in CAPTURE_STATUS_DELAYS:
+            print(f"Current capture status is still settling; rechecking in {delay}s.", flush=True)
+            sleep(delay)
+            if capture_ended(current_run_id):
+                return True
+        return False
+
     def classify_active() -> tuple[list[int], list[int]]:
         draining: list[int] = []
         if current_run_id is not None:
             current = active_runs.get(current_run_id)
             if current is None:
                 raise RuntimeError("Current run is absent from the active inventory; refusing to ignore an unknown run")
-            if current["status"] != "in_progress" or not capture_ended(current_run_id):
+            # The status bucket may also lag behind the run. A verified
+            # terminal capture, rather than that bucket, proves it ended.
+            if not current_capture_ended():
                 raise RuntimeError("Current capture job is not terminal; refusing an overlapping successor")
             draining.append(current_run_id)
         active: list[int] = []
