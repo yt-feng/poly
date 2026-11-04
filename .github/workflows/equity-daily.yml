@@ -153,4 +153,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Acknowledge one successor after the capture job has ended
-        run: python -m equity_daily.continuity --current-run-id "$GITHUB_RUN_ID"
+        env:
+          CURRENT_CAPTURE_RESULT: ${{ needs.capture.result }}
+        run: |
+          python -m equity_daily.continuity --current-run-id "$GITHUB_RUN_ID" \
+            --current-capture-result "$CURRENT_CAPTURE_RESULT"
