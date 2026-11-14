@@ -1,8 +1,8 @@
 """Keep the daily-equity collector running with a bounded, acknowledged handoff.
 
-All callers must hold the same Actions concurrency lock.  This helper does not
-retry GitHub requests: an ambiguous dispatch must be inspected by the next
-watchdog through the complete active-run inventory.
+All callers must hold the same Actions concurrency lock. Inconsistent read
+snapshots receive bounded retries. An ambiguous dispatch must be inspected by
+the next watchdog through the complete active-run inventory.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ PRODUCTION_EVENTS = {"workflow_dispatch", "schedule", "push"}
 RESTART_LIMIT = 3
 RESTART_WINDOW = timedelta(minutes=15)
 CAPTURE_STATUS_DELAYS = (2, 5, 10, 20)
+INVENTORY_STATUS_DELAYS = (2, 5)
 DEPENDENCY_RESULTS = {"success", "failure", "cancelled", "skipped"}
 TERMINAL_CONCLUSIONS = {
     "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
@@ -65,12 +66,16 @@ def _object(value: object, label: str) -> dict:
     return value
 
 
-def _pages(call: Callable[[list[str]], str], endpoint: str, key: str) -> list[dict]:
+class IncompleteInventory(ValueError):
+    """A valid response whose paginated snapshot has not settled yet."""
+
+
+def _pages_once(call: Callable[[list[str]], str], endpoint: str, key: str) -> list[dict]:
     """Validate gh's slurped pagination, including coverage and duplicate IDs.
 
-    A changing inventory can invalidate a page count.  Stopping is preferable to
-    assuming the missing records contain no collector; the next check can take
-    a fresh snapshot.  This also detects GitHub's 1,000-run search-result cap.
+    A changing inventory can invalidate a page count. Reject that entire
+    snapshot so the caller can read it afresh without assuming missing records
+    contain no collector. This also detects GitHub's 1,000-run search-result cap.
     """
     pages = _json(call, ["api", endpoint, "--paginate", "--slurp"])
     if not isinstance(pages, list) or not pages:
@@ -87,18 +92,32 @@ def _pages(call: Callable[[list[str]], str], endpoint: str, key: str) -> list[di
         if expected is None:
             expected = count
         if count != expected or len(rows) > 100 or (index < len(pages) - 1 and len(rows) != 100):
-            raise ValueError("Incomplete or changing pagination; refusing a blind dispatch")
+            raise IncompleteInventory("Incomplete or changing pagination; refusing a blind dispatch")
         for raw_row in rows:
             row = _object(raw_row, "inventory record")
             if key == "workflow_runs":
                 run_id = _positive_id(row.get("id"), "run ID")
                 if run_id in seen:
-                    raise ValueError("Duplicate run in pagination; refusing a blind dispatch")
+                    raise IncompleteInventory("Duplicate run in pagination; refusing a blind dispatch")
                 seen.add(run_id)
             records.append(row)
     if len(records) != expected:
-        raise ValueError("Incomplete pagination; refusing a blind dispatch")
+        raise IncompleteInventory("Incomplete pagination; refusing a blind dispatch")
     return records
+
+
+def _pages(call: Callable[[list[str]], str], endpoint: str, key: str, *,
+           sleep: Callable[[float], None] = time.sleep) -> list[dict]:
+    # Actions can expose its count before the corresponding rows. Re-read the
+    # complete inventory; never accept a partial page set or retry a dispatch.
+    for delay in (*INVENTORY_STATUS_DELAYS, None):
+        try:
+            return _pages_once(call, endpoint, key)
+        except IncompleteInventory:
+            if delay is None:
+                raise
+            print(f"GitHub inventory is still settling; rechecking in {delay}s.", flush=True)
+            sleep(delay)
 
 
 def _created_at(run: dict) -> datetime:
@@ -182,7 +201,7 @@ def ensure_capture(
     def scan_active(statuses: tuple[str, ...]) -> None:
         for status in statuses:
             endpoint = f"{workflow_endpoint}/runs?branch=main&status={status}&per_page=100"
-            for run in _pages(call, endpoint, "workflow_runs"):
+            for run in _pages(call, endpoint, "workflow_runs", sleep=sleep):
                 remember_active(run)
 
     # Lifecycle order prevents queued -> in_progress from slipping between the
@@ -198,7 +217,7 @@ def ensure_capture(
 
     def capture_ended(run_id: int) -> bool:
         validate_capture_run(run_id)
-        jobs = _pages(call, f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100", "jobs")
+        jobs = _pages(call, f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100", "jobs", sleep=sleep)
         for job in jobs:
             status = job.get("status")
             if not isinstance(job.get("name"), str) or not isinstance(status, str) or status not in ACTIVE | {"completed"}:
@@ -262,7 +281,7 @@ def ensure_capture(
     cutoff = now - RESTART_WINDOW
     since = quote(">=" + cutoff.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"), safe="")
     recent_runs = _pages(
-        call, f"{workflow_endpoint}/runs?branch=main&created={since}&per_page=100", "workflow_runs",
+        call, f"{workflow_endpoint}/runs?branch=main&created={since}&per_page=100", "workflow_runs", sleep=sleep,
     )
     recent: set[int] = set()
     for run in recent_runs:

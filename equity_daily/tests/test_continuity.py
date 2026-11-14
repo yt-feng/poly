@@ -135,6 +135,34 @@ class ContinuityTests(unittest.TestCase):
             self.ensure(server, current)
         self.assertEqual(server.posts, [])
 
+    def test_partial_inventory_settles_before_an_existing_capture_is_recognized(self):
+        server = FakeGitHub([run_fixture(901)])
+        original = server.__call__
+        reads = 0
+        def settling(args):
+            nonlocal reads
+            if 'status=in_progress' in args[1]:
+                reads += 1
+                if reads == 1:
+                    return json.dumps([{'total_count': 1, 'workflow_runs': []}])
+            return original(args)
+        delays = []
+        result = continuity.ensure_capture(REPO, now=NOW, call=settling, sleep=delays.append)
+        self.assertEqual(result['action'], 'already_active')
+        self.assertEqual(result['runs'], [901])
+        self.assertEqual(delays, [2])
+        self.assertEqual(server.posts, [])
+
+    def test_persistently_partial_inventory_stops_after_bounded_reads(self):
+        calls, delays = [], []
+        def incomplete(args):
+            calls.append(args)
+            return json.dumps([{'total_count': 1, 'workflow_runs': []}])
+        with self.assertRaisesRegex(ValueError, 'Incomplete pagination'):
+            continuity._pages(incomplete, 'inventory', 'workflow_runs', sleep=delays.append)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(delays, [2, 5])
+
     def test_six_successive_handoffs_and_duplicate_watchdog(self):
         current = 501
         server = FakeGitHub([run_fixture(current)], {
