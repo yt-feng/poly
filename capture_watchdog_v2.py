@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone
 import argparse
 import json
 import os
+import re
+import subprocess
+import time
 from functools import partial
 from urllib.parse import quote
 
@@ -15,6 +18,23 @@ from archive_v2 import gh
 ACTIVE = {'requested', 'waiting', 'pending', 'queued', 'in_progress'}
 PRODUCTION_WORKFLOW = 'capture-v2.yml'
 PRODUCTION_RESTART_LIMIT = 3
+
+
+def _acknowledged_successor(repo, run_id, call):
+    # A successful dispatch can precede visibility of its exact run by a few
+    # seconds. Only this acknowledged ID gets bounded 404 read retries; the POST
+    # and ordinary missing-resource reads remain non-retryable.
+    for attempt in range(3):
+        try:
+            return json.loads(call('api', f'repos/{repo}/actions/runs/{run_id}'))
+        except subprocess.CalledProcessError as error:
+            diagnostic = error.stderr or ''
+            if isinstance(diagnostic, bytes):
+                diagnostic = diagnostic.decode('utf-8', errors='replace')
+            statuses = re.findall(r'\bHTTP(?:/\d(?:\.\d)?)?\s+(\d{3})\b', diagnostic, re.I)
+            if not statuses or set(statuses) != {'404'} or attempt == 2:
+                raise
+            time.sleep((2, 5)[attempt])
 
 
 def _identity(run, repo, workflow, branch):
@@ -78,7 +98,7 @@ def ensure_workflow(repo, *, workflow, branch, worker_job, current_run_id=None,
     successor_id = result['workflow_run_id']
     if type(successor_id) is not int or successor_id <= 0 or successor_id == current_run_id:
         raise RuntimeError('Dispatch did not acknowledge a distinct successor run')
-    successor = json.loads(call('api', f'repos/{repo}/actions/runs/{successor_id}'))
+    successor = _acknowledged_successor(repo, successor_id, call)
     _identity(successor, repo, workflow, branch)
     if successor.get('id') != successor_id:
         raise RuntimeError('Successor response has a mismatched ID')

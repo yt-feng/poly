@@ -1,8 +1,9 @@
 import json
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from capture_watchdog_v2 import ensure_capture, ensure_workflow, PRODUCTION_RESTART_LIMIT
 from capture_continuity_probe import continue_probe
@@ -163,6 +164,58 @@ class ContinuityTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             ensure_capture('owner/repo', current_run_id=1, now=api.now, call=call)
         self.assertEqual(len(posts),1)
+
+    def test_acknowledged_successor_can_be_briefly_invisible_without_another_post(self):
+        api = Actions(); reads = []
+        def call(*args):
+            if args == ('api', 'repos/owner/repo/actions/runs/2'):
+                reads.append(args)
+                if len(reads) == 1:
+                    raise subprocess.CalledProcessError(1, args, stderr='gh: Not Found (HTTP 404)')
+            return api(*args)
+        with patch('capture_watchdog_v2.time.sleep') as sleep:
+            result = ensure_capture('owner/repo', current_run_id=1, now=api.now, call=call)
+        self.assertEqual(result['successor_run_id'], 2)
+        self.assertEqual(api.posts, 1)
+        self.assertEqual(len(reads), 2)
+        sleep.assert_called_once_with(2)
+
+    def test_acknowledged_404_exhaustion_never_dispatches_again(self):
+        api = Actions(); reads = []
+        def call(*args):
+            if args == ('api', 'repos/owner/repo/actions/runs/2'):
+                reads.append(args)
+                raise subprocess.CalledProcessError(1, args, stderr=b'gh: Not Found (HTTP 404)')
+            return api(*args)
+        with patch('capture_watchdog_v2.time.sleep') as sleep:
+            with self.assertRaises(subprocess.CalledProcessError):
+                ensure_capture('owner/repo', current_run_id=1, now=api.now, call=call)
+        self.assertEqual(api.posts, 1)
+        self.assertEqual(len(reads), 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [2, 5])
+
+    def test_acknowledged_auth_and_other_failures_are_not_visibility_retries(self):
+        for diagnostic in ('HTTP 401', 'HTTP 403', 'HTTP 422', 'HTTP 404 then HTTP 403', 'unknown'):
+            api = Actions(); reads = []
+            def call(*args):
+                if args == ('api', 'repos/owner/repo/actions/runs/2'):
+                    reads.append(args)
+                    raise subprocess.CalledProcessError(1, args, stderr=diagnostic)
+                return api(*args)
+            with self.subTest(diagnostic=diagnostic), patch('capture_watchdog_v2.time.sleep') as sleep:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    ensure_capture('owner/repo', current_run_id=1, now=api.now, call=call)
+                self.assertEqual(api.posts, 1)
+                self.assertEqual(len(reads), 1)
+                sleep.assert_not_called()
+
+    def test_unacknowledged_404_still_fails_without_dispatch(self):
+        call = Mock(side_effect=subprocess.CalledProcessError(1, ['gh'], stderr='HTTP 404'))
+        with patch('capture_watchdog_v2.time.sleep') as sleep:
+            with self.assertRaises(subprocess.CalledProcessError):
+                ensure_capture('owner/repo', now=Actions().now, call=call)
+        self.assertEqual(call.call_count, 1)
+        sleep.assert_not_called()
 
     def test_probe_is_finite_and_cannot_use_production_branch(self):
         scheduler=Mock(return_value={'action':'dispatched','successor_run_id':2})
